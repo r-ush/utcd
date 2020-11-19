@@ -1022,6 +1022,10 @@ func (b *BlockChain) createChainState() error {
 	b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
 		numTxns, time.Unix(node.timestamp, 0))
 
+	//if b.utreexoCSN {
+	//	return nil
+	//}
+
 	// Create the initial the database chain state including creating the
 	// necessary index buckets and inserting the genesis block.
 	err := b.db.Update(func(dbTx database.Tx) error {
@@ -1126,6 +1130,11 @@ func (b *BlockChain) initChainState() error {
 			return nil
 		}
 	}
+
+	//if b.utreexoCSN {
+	//	// TODO fill in
+	//	return nil
+	//}
 
 	// Attempt to load the chain state from the database.
 	err = b.db.View(func(dbTx database.Tx) error {

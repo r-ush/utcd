@@ -37,6 +37,7 @@ const (
 	CmdGetData      = "getdata"
 	CmdNotFound     = "notfound"
 	CmdBlock        = "block"
+	CmdUBlock       = "ublock"
 	CmdTx           = "tx"
 	CmdGetHeaders   = "getheaders"
 	CmdHeaders      = "headers"

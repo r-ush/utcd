@@ -187,6 +187,10 @@ type MessageListeners struct {
 	// message.
 	OnMerkleBlock func(p *Peer, msg *wire.MsgMerkleBlock)
 
+	// OnUBlock  is invoked when a peer receives a Utreexo block
+	// message.
+	OnUBlock func(p *Peer, msg *wire.MsgUBlock, buf []byte)
+
 	// OnVersion is invoked when a peer receives a version bitcoin message.
 	// The caller may return a reject message in which case the message will
 	// be sent to the peer and the peer will be disconnected.
@@ -1429,6 +1433,10 @@ out:
 		case *wire.MsgBlock:
 			if p.cfg.Listeners.OnBlock != nil {
 				p.cfg.Listeners.OnBlock(p, msg, buf)
+			}
+		case *wire.MsgUBlock:
+			if p.cfg.Listeners.OnUBlock != nil {
+				p.cfg.Listeners.OnUBlock(p, msg, buf)
 			}
 
 		case *wire.MsgInv:

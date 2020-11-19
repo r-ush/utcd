@@ -435,6 +435,11 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 
 	// Reject outbound peers that are not full nodes.
 	wantServices := wire.SFNodeNetwork
+
+	if sp.server.services&wire.SFNodeUtreexo == wire.SFNodeUtreexo {
+		fmt.Println("WANT UTREEXO")
+		wantServices = wire.SFNodeUtreexo
+	}
 	if !isInbound && !hasServices(msg.Services, wantServices) {
 		missingServices := wantServices & ^msg.Services
 		srvrLog.Debugf("Rejecting peer %s with services %v due to not "+
@@ -585,6 +590,30 @@ func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
 	<-sp.blockProcessed
 }
 
+func (sp *serverPeer) OnUBlock(_ *peer.Peer, msg *wire.MsgUBlock, buf []byte) {
+	// Convert the raw MsgBlock to a btcutil.Block which provides some
+	// convenience methods and things such as hash caching.
+	ublock := btcutil.NewUBlockFromBlockAndBytes(msg, buf)
+
+	// Add the block to the known inventory for the peer.
+	iv := wire.NewInvVect(wire.InvTypeBlock, ublock.Hash())
+	sp.AddKnownInventory(iv)
+
+	// Queue the block up to be handled by the block
+	// manager and intentionally block further receives
+	// until the bitcoin block is fully processed and known
+	// good or bad.  This helps prevent a malicious peer
+	// from queuing up a bunch of bad blocks before
+	// disconnecting (or being disconnected) and wasting
+	// memory.  Additionally, this behavior is depended on
+	// by at least the block acceptance test tool as the
+	// reference implementation processes blocks in the same
+	// thread and therefore blocks further messages until
+	// the bitcoin block has been fully processed.
+	sp.server.syncManager.QueueUBlock(ublock, sp.Peer, sp.blockProcessed)
+	<-sp.blockProcessed
+}
+
 // OnInv is invoked when a peer receives an inv bitcoin message and is
 // used to examine the inventory being advertised by the remote peer and react
 // accordingly.  We pass the message down to blockmanager which will call
@@ -676,6 +705,8 @@ func (sp *serverPeer) OnGetData(_ *peer.Peer, msg *wire.MsgGetData) {
 			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
 		case wire.InvTypeFilteredBlock:
 			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
+		case wire.InvTypeUBlock:
+			err = sp.server.pushUBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
 		default:
 			peerLog.Warnf("Unknown type in inventory request %d",
 				iv.Type)
@@ -1581,6 +1612,12 @@ func (s *server) pushMerkleBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 				encoding)
 		}
 	}
+
+	return nil
+}
+
+func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
+	doneChan chan<- struct{}, waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
 
 	return nil
 }
@@ -2631,6 +2668,9 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.NoCFilters {
 		services &^= wire.SFNodeCF
 	}
+	if cfg.UtreexoCSN {
+		services = wire.SFNodeUtreexo
+	}
 
 	amgr := addrmgr.New(cfg.DataDir, btcdLookup)
 
@@ -2724,14 +2764,17 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	// Create a new block chain instance with the appropriate configuration.
 	var err error
 	s.chain, err = blockchain.New(&blockchain.Config{
-		DB:           s.db,
-		Interrupt:    interrupt,
-		ChainParams:  s.chainParams,
-		Checkpoints:  checkpoints,
-		TimeSource:   s.timeSource,
-		SigCache:     s.sigCache,
-		IndexManager: indexManager,
-		HashCache:    s.hashCache,
+		DB:               s.db,
+		Interrupt:        interrupt,
+		ChainParams:      s.chainParams,
+		Checkpoints:      checkpoints,
+		TimeSource:       s.timeSource,
+		SigCache:         s.sigCache,
+		IndexManager:     indexManager,
+		HashCache:        s.hashCache,
+		Utreexo:          cfg.Utreexo,
+		UtreexoCSN:       cfg.UtreexoCSN,
+		UtreexoLookAhead: cfg.UtreexoLookAhead,
 	})
 	if err != nil {
 		return nil, err

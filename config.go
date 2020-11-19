@@ -160,6 +160,9 @@ type config struct {
 	SigCacheMaxSize      uint          `long:"sigcachemaxsize" description:"The maximum number of entries in the signature verification cache"`
 	SimNet               bool          `long:"simnet" description:"Use the simulation test network"`
 	TestNet3             bool          `long:"testnet" description:"Use the test network"`
+	Utreexo              bool          `long:"utreexo" description:"Serve Utreexo Proofs"`
+	UtreexoCSN           bool          `long:"utreexocsn" description:"Enable Utreexo pruning"`
+	UtreexoLookAhead     int           `long:"utreexolookahead" description:"How many blocks ahead to cache for Utreexo"`
 	TorIsolation         bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
 	TrickleInterval      time.Duration `long:"trickleinterval" description:"Minimum time between attempts to send new inventory to a connected peer"`
 	TxIndex              bool          `long:"txindex" description:"Maintain a full hash-based transaction index which makes all transactions available via the getrawtransaction RPC"`
@@ -529,6 +532,25 @@ func loadConfig() (*config, []string, error) {
 		str := "%s: Failed to create home directory: %v"
 		err := fmt.Errorf(str, funcName, err)
 		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	// Multiple utreexo modes can't be selected simultaneously.
+	numUtreexo := 0
+
+	if cfg.Utreexo {
+		numUtreexo++
+	}
+	if cfg.UtreexoCSN {
+		numUtreexo++
+	}
+
+	if numUtreexo > 1 {
+		str := "%s: The utreexo and utreexocsn params " +
+			"can't be used together -- choose one of the two"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
 		return nil, nil, err
 	}
 

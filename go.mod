@@ -1,5 +1,7 @@
 module github.com/btcsuite/btcd
 
+go 1.14
+
 require (
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
 	github.com/btcsuite/btcutil v1.0.2
@@ -11,7 +13,10 @@ require (
 	github.com/decred/dcrd/lru v1.0.0
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
-	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37
+	github.com/mit-dci/utreexo v0.0.0-00010101000000-000000000000
+	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 )
 
-go 1.14
+replace github.com/mit-dci/utreexo => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/mit-dci/utreexo/
+
+replace github.com/btcsuite/btcutil => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/btcsuite/btcutil
