@@ -3758,7 +3758,6 @@ type rpcServer struct {
 	helpCacher             *helpCacher
 	requestProcessShutdown chan struct{}
 	quit                   chan int
-	utreexoCSN             bool
 }
 
 // httpStatusLine returns a response Status-Line (RFC 2616 Section 6.1)
@@ -4416,8 +4415,6 @@ type rpcserverConfig struct {
 	// The fee estimator keeps track of how long transactions are left in
 	// the mempool before they are mined into blocks.
 	FeeEstimator *mempool.FeeEstimator
-
-	UtreexoCSN bool
 }
 
 // newRPCServer returns a new instance of the rpcServer struct.
@@ -4429,7 +4426,6 @@ func newRPCServer(config *rpcserverConfig) (*rpcServer, error) {
 		helpCacher:             newHelpCacher(),
 		requestProcessShutdown: make(chan struct{}),
 		quit:                   make(chan int),
-		utreexoCSN:             config.UtreexoCSN,
 	}
 	if cfg.RPCUser != "" && cfg.RPCPass != "" {
 		login := cfg.RPCUser + ":" + cfg.RPCPass
@@ -4464,18 +4460,7 @@ func (s *rpcServer) handleBlockchainNotification(notification *blockchain.Notifi
 		s.gbtWorkState.NotifyBlockConnected(block.Hash())
 
 	case blockchain.NTBlockConnected:
-		var ok bool
-		var block *btcutil.Block
-
-		if s.utreexoCSN {
-			var ublock *btcutil.UBlock
-			ublock, ok = notification.Data.(*btcutil.UBlock)
-			block = ublock.Block()
-		} else {
-			block, ok = notification.Data.(*btcutil.Block)
-		}
-
-		//block, ok := notification.Data.(*btcutil.Block)
+		block, ok := notification.Data.(*btcutil.Block)
 		if !ok {
 			rpcsLog.Warnf("Chain connected notification is not a block.")
 			break

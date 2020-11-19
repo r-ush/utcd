@@ -592,6 +592,26 @@ func (view *UtxoViewpoint) fetchInputUtxos(db database.DB, block *btcutil.Block)
 	return view.fetchUtxosMain(db, neededSet)
 }
 
+// UBlockToUtxoView converts a UData into a btcd blockchain.UtxoViewpoint
+// all the data is there, just a bit different format.
+// Note that this needs blockchain.NewUtxoEntry() in btcd
+func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
+	m := view.Entries()
+	// loop through leafDatas and convert them into UtxoEntries (pretty much the
+	// same thing
+	for _, ld := range ub.MsgUBlock().UtreexoData.Stxos {
+		txo := wire.NewTxOut(ld.Amt, ld.PkScript)
+		utxo := NewUtxoEntry(txo, ld.Height, ld.Coinbase)
+		op := wire.OutPoint{
+			Hash:  chainhash.Hash(ld.TxHash),
+			Index: ld.Index,
+		}
+		m[op] = utxo
+	}
+
+	return nil
+}
+
 // NewUtxoViewpoint returns a new empty unspent transaction output view.
 func NewUtxoViewpoint() *UtxoViewpoint {
 	return &UtxoViewpoint{

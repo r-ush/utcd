@@ -138,6 +138,11 @@ type BlockChain struct {
 	nextCheckpoint *chaincfg.Checkpoint
 	checkpointNode *blockNode
 
+	utreexo          bool
+	utreexoCSN       bool
+	utreexoLookAhead int
+	utreexoViewpoint *UtreexoViewpoint
+
 	// The state is used as a fairly efficient way to cache information
 	// about the current best chain state that is returned to callers when
 	// requested.  It operates on the principle of MVCC such that any time a
@@ -667,6 +672,134 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 	return nil
 }
+func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, stxos []SpentTxOut, view *UtxoViewpoint) error {
+	// Make sure it's extending the end of the best chain.
+	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	if !prevHash.IsEqual(&b.bestChain.Tip().hash) {
+		return AssertError("connectUBlock must be called with a ublock " +
+			"that extends the main chain")
+	}
+
+	// Sanity check the correct number of stxos are provided.
+	if len(stxos) != countSpentOutputs(ublock.Block()) {
+		return AssertError("connectBlock called with inconsistent " +
+			"spent transaction out information")
+	}
+
+	// No warnings about unknown rules until the chain is current.
+	if b.isCurrent() {
+		// Warn if any unknown new rules are either about to activate or
+		// have already been activated.
+		if err := b.warnUnknownRuleActivations(node); err != nil {
+			return err
+		}
+	}
+
+	// Write any block status changes to DB before updating best state.
+	err := b.index.flushToDB()
+	if err != nil {
+		return err
+	}
+
+	// Generate a new best state snapshot that will be used to update the
+	// database and later memory if all database updates are successful.
+	b.stateLock.RLock()
+	curTotalTxns := b.stateSnapshot.TotalTxns
+	b.stateLock.RUnlock()
+	numTxns := uint64(len(ublock.MsgUBlock().MsgBlock.Transactions))
+	blockSize := uint64(ublock.MsgUBlock().MsgBlock.SerializeSize())
+	blockWeight := uint64(GetBlockWeight(ublock.Block()))
+	state := newBestState(node, blockSize, blockWeight, numTxns,
+		curTotalTxns+numTxns, node.CalcPastMedianTime())
+
+	// TODO this is probably slow. Is also ugly
+	//stxos := make([]SpentTxOut, 0, countSpentOutputs(ublock.Block()))
+	for _, leaf := range ublock.MsgUBlock().UtreexoData.Stxos {
+		stxo := SpentTxOut{
+			Amount:     leaf.Amt,
+			PkScript:   leaf.PkScript,
+			Height:     leaf.Height,
+			IsCoinBase: leaf.Coinbase,
+		}
+		stxos = append(stxos, stxo)
+	}
+
+	// Atomically insert info into the database.
+	err = b.db.Update(func(dbTx database.Tx) error {
+		// Update best block state.
+		err := dbPutBestState(dbTx, state, node.workSum)
+		if err != nil {
+			return err
+		}
+
+		// Add the block hash and height to the block index which tracks
+		// the main chain.
+		err = dbPutBlockIndex(dbTx, ublock.Hash(), node.height)
+		if err != nil {
+			return err
+		}
+
+		// Update the utxo set using the state of the utxo view.  This
+		// entails removing all of the utxos spent and adding the new
+		// ones created by the block.
+		err = dbPutUtxoView(dbTx, view)
+		if err != nil {
+			return err
+		}
+
+		err = b.utreexoViewpoint.Modify(ublock)
+		if err != nil {
+			return err
+		}
+
+		err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, *ublock.Hash())
+		if err != nil {
+			return err
+		}
+
+		// Update the transaction spend journal by adding a record for
+		// the block that contains all txos spent by it.
+		err = dbPutSpendJournalEntry(dbTx, ublock.Hash(), stxos)
+		if err != nil {
+			return err
+		}
+
+		// Allow the index manager to call each of the currently active
+		// optional indexes with the block being connected so they can
+		// update themselves accordingly.
+		if b.indexManager != nil {
+			err := b.indexManager.ConnectBlock(dbTx, ublock.Block(), stxos)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// This node is now the end of the best chain.
+	b.bestChain.SetTip(node)
+
+	// Update the state for the best block.  Notice how this replaces the
+	// entire struct instead of updating the existing one.  This effectively
+	// allows the old version to act as a snapshot which callers can use
+	// freely without needing to hold a lock for the duration.  See the
+	// comments on the state variable for more details.
+	b.stateLock.Lock()
+	b.stateSnapshot = state
+	b.stateLock.Unlock()
+
+	// Notify the caller that the block was connected to the main chain.
+	// The caller would typically want to react with actions such as
+	// updating wallets.
+	b.chainLock.Unlock()
+	b.sendNotification(NTBlockConnected, ublock)
+	b.chainLock.Lock()
+	return nil
+}
 
 // disconnectBlock handles disconnecting the passed node/block from the end of
 // the main (best) chain.
@@ -1091,7 +1224,6 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 	if parentHash.IsEqual(&b.bestChain.Tip().hash) {
 		// Skip checks if node has already been fully validated.
 		fastAdd = fastAdd || b.index.NodeStatus(node).KnownValid()
-
 		// Perform several checks to verify the block can be connected
 		// to the main chain without violating any rules and without
 		// actually connecting the block.
@@ -1160,6 +1292,162 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 	if fastAdd {
 		log.Warnf("fastAdd set in the side chain case? %v\n",
 			block.Hash())
+	}
+
+	// We're extending (or creating) a side chain, but the cumulative
+	// work for this new side chain is not enough to make it the new chain.
+	if node.workSum.Cmp(b.bestChain.Tip().workSum) <= 0 {
+		// Log information about how the block is forking the chain.
+		fork := b.bestChain.FindFork(node)
+		if fork.hash.IsEqual(parentHash) {
+			log.Infof("FORK: Block %v forks the chain at height %d"+
+				"/block %v, but does not cause a reorganize",
+				node.hash, fork.height, fork.hash)
+		} else {
+			log.Infof("EXTEND FORK: Block %v extends a side chain "+
+				"which forks the chain at height %d/block %v",
+				node.hash, fork.height, fork.hash)
+		}
+
+		return false, nil
+	}
+
+	// We're extending (or creating) a side chain and the cumulative work
+	// for this new side chain is more than the old best chain, so this side
+	// chain needs to become the main chain.  In order to accomplish that,
+	// find the common ancestor of both sides of the fork, disconnect the
+	// blocks that form the (now) old fork from the main chain, and attach
+	// the blocks that form the new chain to the main chain starting at the
+	// common ancenstor (the point where the chain forked).
+	detachNodes, attachNodes := b.getReorganizeNodes(node)
+
+	// Reorganize the chain.
+	log.Infof("REORGANIZE: Block %v is causing a reorganize.", node.hash)
+	err := b.reorganizeChain(detachNodes, attachNodes)
+
+	// Either getReorganizeNodes or reorganizeChain could have made unsaved
+	// changes to the block index, so flush regardless of whether there was an
+	// error. The index would only be dirty if the block failed to connect, so
+	// we can ignore any errors writing.
+	if writeErr := b.index.flushToDB(); writeErr != nil {
+		log.Warnf("Error flushing block index changes to disk: %v", writeErr)
+	}
+
+	return err == nil, err
+}
+
+// connectBestChainUBlock handles connecting the passed ublock to the chain while
+// respecting proper chain selection according to the chain with the most
+// proof of work.  In the typical case, the new block simply extends the main
+// chain.  However, it may also be extending (or creating) a side chain (fork)
+// which may or may not end up becoming the main chain depending on which fork
+// cumulatively has the most proof of work.  It returns whether or not the block
+// ended up on the main chain (either due to extending the main chain or causing
+// a reorganization to become the main chain).
+//
+// The flags modify the behavior of this function as follows:
+//  - BFFastAdd: Avoids several expensive transaction validation operations.
+//    This is useful when using checkpoints.
+//
+// This function MUST be called with the chain state lock held (for writes).
+func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
+	fastAdd := flags&BFFastAdd == BFFastAdd
+
+	flushIndexState := func() {
+		// Intentionally ignore errors writing updated node status to DB. If
+		// it fails to write, it's not the end of the world. If the block is
+		// valid, we flush in connectBlock and if the block is invalid, the
+		// worst that can happen is we revalidate the block after a restart.
+		if writeErr := b.index.flushToDB(); writeErr != nil {
+			log.Warnf("Error flushing block index changes to disk: %v",
+				writeErr)
+		}
+	}
+
+	// We are extending the main (best) chain with a new block.  This is the
+	// most common case.
+	parentHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	if parentHash.IsEqual(&b.bestChain.Tip().hash) {
+		// Skip checks if node has already been fully validated.
+		fastAdd = fastAdd || b.index.NodeStatus(node).KnownValid()
+		// Perform several checks to verify the block can be connected
+		// to the main chain without violating any rules and without
+		// actually connecting the block.
+		view := NewUtxoViewpoint()
+		view.SetBestHash(parentHash)
+
+		stxos := make([]SpentTxOut, 0, countSpentOutputs(ublock.Block()))
+		if !fastAdd {
+			err := b.checkConnectUBlock(node, ublock, view, &stxos)
+			if err == nil {
+				b.index.SetStatusFlags(node, statusValid)
+			} else if _, ok := err.(RuleError); ok {
+				b.index.SetStatusFlags(node, statusValidateFailed)
+			} else {
+				return false, err
+			}
+
+			flushIndexState()
+
+			if err != nil {
+				return false, err
+			}
+		}
+
+		// In the fast add case the code to check the block connection
+		// was skipped, so the utxo view needs to load the referenced
+		// utxos, spend them, and add the new utxos being created by
+		// this block.
+		if fastAdd {
+			err := view.fetchInputUtxos(b.db, ublock.Block())
+			if err != nil {
+				return false, err
+			}
+			err = view.connectTransactions(ublock.Block(), &stxos)
+			if err != nil {
+				return false, err
+			}
+
+			//err = view.UBlockToUtxoView(*ublock)
+			//if err != nil {
+			//	return false, err
+			//}
+			//err = b.utreexoViewpoint.Modify(ublock)
+			//if err != nil {
+			//	return false, err
+			//}
+		}
+
+		// Connect the block to the main chain.
+		err := b.connectUBlock(node, ublock, stxos, view)
+		if err != nil {
+			// If we got hit with a rule error, then we'll mark
+			// that status of the block as invalid and flush the
+			// index state to disk before returning with the error.
+			if _, ok := err.(RuleError); ok {
+				b.index.SetStatusFlags(
+					node, statusValidateFailed,
+				)
+			}
+
+			flushIndexState()
+
+			return false, err
+		}
+
+		// If this is fast add, or this block node isn't yet marked as
+		// valid, then we'll update its status and flush the state to
+		// disk again.
+		if fastAdd || !b.index.NodeStatus(node).KnownValid() {
+			b.index.SetStatusFlags(node, statusValid)
+			flushIndexState()
+		}
+
+		return true, nil
+	}
+	if fastAdd {
+		log.Warnf("fastAdd set in the side chain case? %v\n",
+			ublock.Hash())
 	}
 
 	// We're extending (or creating) a side chain, but the cumulative
@@ -1700,6 +1988,12 @@ type Config struct {
 	// This field can be nil if the caller is not interested in using a
 	// signature cache.
 	HashCache *txscript.HashCache
+
+	Utreexo bool
+
+	UtreexoCSN bool
+
+	UtreexoLookAhead int
 }
 
 // New returns a BlockChain instance using the provided configuration details.
@@ -1755,6 +2049,15 @@ func New(config *Config) (*BlockChain, error) {
 		prevOrphans:         make(map[chainhash.Hash][]*orphanBlock),
 		warningCaches:       newThresholdCaches(vbNumBits),
 		deploymentCaches:    newThresholdCaches(chaincfg.DefinedDeployments),
+		utreexo:             config.Utreexo,
+		utreexoCSN:          config.UtreexoCSN,
+		utreexoLookAhead:    config.UtreexoLookAhead,
+	}
+
+	if config.UtreexoCSN {
+		b.utreexoLookAhead = config.UtreexoLookAhead
+		b.utreexoCSN = config.UtreexoCSN
+		//b.utreexoViewpoint = NewUtreexoViewpoint()
 	}
 
 	// Initialize the chain state from the passed database.  When the db
