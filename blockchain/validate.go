@@ -1258,7 +1258,8 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 // with that node.
 //
 // This function MUST be called with the chain state lock held (for writes).
-func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock, view *UtxoViewpoint) error {
+func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock, view *UtxoViewpoint, stxos *[]SpentTxOut) error {
+	fmt.Println("CHECK CONNECT UBLOCK")
 	// If the side chain blocks end up in the database, a call to
 	// CheckBlockSanity should be done here in case a previous version
 	// allowed a block that is no longer valid.  However, since the
@@ -1297,22 +1298,22 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 	// BIP0030 check is expensive since it involves a ton of cache misses in
 	// the utxoset.
 	// TODO actually check BIP0030
-	//if !isBIP0030Node(node) && (node.height < b.chainParams.BIP0034Height) {
-	//	err := b.checkBIP0030(node, ublock, view)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
+	if !isBIP0030Node(node) && (node.height < b.chainParams.BIP0034Height) {
+		err := b.checkBIP0030(node, ublock.Block(), view)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Load all of the utxos referenced by the inputs for all transactions
 	// in the block don't already exist in the utxo view from the database.
 	//
 	// These utxo entries are needed for verification of things such as
 	// transaction inputs, counting pay-to-script-hashes, and scripts.
-	//err := view.fetchInputUtxos(b.db, ublock)
-	//if err != nil {
-	//	return err
-	//}
+	err := view.fetchInputUtxos(b.db, ublock.Block())
+	if err != nil {
+		return err
+	}
 	view.UBlockToUtxoView(*ublock)
 
 	// BIP0016 describes a pay-to-script-hash type that is considered a
@@ -1391,10 +1392,10 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 		// provably unspendable as available utxos.  Also, the passed
 		// spent txos slice is updated to contain an entry for each
 		// spent txout in the order each transaction spends them.
-		//err = view.connectTransaction(tx, node.height, stxos)
-		//if err != nil {
-		//	return err
-		//}
+		err = view.connectTransaction(tx, node.height, stxos)
+		if err != nil {
+			return err
+		}
 	}
 
 	// The total output values of the coinbase transaction must not exceed
@@ -1493,6 +1494,7 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 		scriptFlags |= txscript.ScriptStrictMultiSig
 	}
 
+	fmt.Println("CHECKING SIGNATURES")
 	// Now that the inexpensive checks are done and have passed, verify the
 	// transactions are actually allowed to spend the coins by running the
 	// expensive ECDSA signature check scripts.  Doing this last helps

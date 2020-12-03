@@ -123,12 +123,12 @@ func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFla
 	// expensive connection logic.  It also has some other nice properties
 	// such as making blocks that never become part of the main chain or
 	// blocks that fail to connect available for further analysis.
-	//err = b.db.Update(func(dbTx database.Tx) error {
-	//	return dbStoreBlock(dbTx, block)
-	//})
-	//if err != nil {
-	//	return false, err
-	//}
+	err = b.db.Update(func(dbTx database.Tx) error {
+		return dbStoreBlock(dbTx, ublock.Block())
+	})
+	if err != nil {
+		return false, err
+	}
 
 	// Create a new block node for the block and add it to the node index. Even
 	// if the block ultimately gets connected to the main chain, it starts out

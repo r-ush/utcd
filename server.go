@@ -438,7 +438,7 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 
 	if sp.server.services&wire.SFNodeUtreexo == wire.SFNodeUtreexo {
 		fmt.Println("WANT UTREEXO")
-		wantServices = wire.SFNodeUtreexo
+		wantServices &^= wire.SFNodeUtreexo
 	}
 	if !isInbound && !hasServices(msg.Services, wantServices) {
 		missingServices := wantServices & ^msg.Services
@@ -567,6 +567,7 @@ func (sp *serverPeer) OnTx(_ *peer.Peer, msg *wire.MsgTx) {
 // OnBlock is invoked when a peer receives a block bitcoin message.  It
 // blocks until the bitcoin block has been fully processed.
 func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
+	fmt.Println("ONBLOCK")
 	// Convert the raw MsgBlock to a btcutil.Block which provides some
 	// convenience methods and things such as hash caching.
 	block := btcutil.NewBlockFromBlockAndBytes(msg, buf)
@@ -1352,6 +1353,8 @@ func (sp *serverPeer) OnNotFound(p *peer.Peer, msg *wire.MsgNotFound) {
 		switch inv.Type {
 		case wire.InvTypeBlock:
 			numBlocks++
+		case wire.InvTypeUBlock:
+			numBlocks++
 		case wire.InvTypeWitnessBlock:
 			numBlocks++
 		case wire.InvTypeTx:
@@ -2067,6 +2070,7 @@ func newPeerConfig(sp *serverPeer) *peer.Config {
 			OnMemPool:      sp.OnMemPool,
 			OnTx:           sp.OnTx,
 			OnBlock:        sp.OnBlock,
+			OnUBlock:       sp.OnUBlock,
 			OnInv:          sp.OnInv,
 			OnHeaders:      sp.OnHeaders,
 			OnGetData:      sp.OnGetData,
@@ -2208,6 +2212,7 @@ out:
 
 		// Disconnected peers.
 		case p := <-s.donePeers:
+			fmt.Println(" IN SERVER	HERE")
 			s.handleDonePeerMsg(state, p)
 
 		// Block accepted in mainchain or orphan, update peer height.
@@ -2844,6 +2849,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		ChainParams:        s.chainParams,
 		DisableCheckpoints: cfg.DisableCheckpoints,
 		MaxPeers:           cfg.MaxPeers,
+		UtreexoCSN:         cfg.UtreexoCSN,
 		FeeEstimator:       s.feeEstimator,
 	})
 	if err != nil {

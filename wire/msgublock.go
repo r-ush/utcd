@@ -8,8 +8,8 @@ import (
 )
 
 type MsgUBlock struct {
-	MsgBlock    *MsgBlock
-	UtreexoData *btcacc.UData
+	MsgBlock    MsgBlock
+	UtreexoData btcacc.UData
 }
 
 func (ub *MsgUBlock) BlockHash() chainhash.Hash {
@@ -17,10 +17,12 @@ func (ub *MsgUBlock) BlockHash() chainhash.Hash {
 }
 
 func (ub *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
-	err := ub.MsgBlock.Deserialize(r)
+	ub.MsgBlock = MsgBlock{}
+	err := ub.MsgBlock.BtcDecode(r, pver, enc)
 	if err != nil {
 		return err
 	}
+	ub.UtreexoData = btcacc.UData{}
 	err = ub.UtreexoData.Deserialize(r)
 
 	return nil

@@ -17,6 +17,6 @@ require (
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 )
 
-replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20201125061340-ccd45d447ae7
+replace github.com/mit-dci/utreexo => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/mit-dci/utreexo
 
-//replace github.com/btcsuite/btcutil => github.com/kcalvinalvin/btcutil
+replace github.com/btcsuite/btcutil => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/btcsuite/btcutil

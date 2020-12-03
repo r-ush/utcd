@@ -672,8 +672,7 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 	return nil
 }
-func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock,
-) error {
+func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, stxos []SpentTxOut, view *UtxoViewpoint) error {
 	// Make sure it's extending the end of the best chain.
 	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
 	if !prevHash.IsEqual(&b.bestChain.Tip().hash) {
@@ -682,10 +681,10 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock,
 	}
 
 	// Sanity check the correct number of stxos are provided.
-	//if len(stxos) != countSpentOutputs(block) {
-	//	return AssertError("connectBlock called with inconsistent " +
-	//		"spent transaction out information")
-	//}
+	if len(stxos) != countSpentOutputs(ublock.Block()) {
+		return AssertError("connectBlock called with inconsistent " +
+			"spent transaction out information")
+	}
 
 	// No warnings about unknown rules until the chain is current.
 	if b.isCurrent() {
@@ -714,7 +713,7 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock,
 		curTotalTxns+numTxns, node.CalcPastMedianTime())
 
 	// TODO this is probably slow. Is also ugly
-	stxos := make([]SpentTxOut, 0, countSpentOutputs(ublock.Block()))
+	//stxos := make([]SpentTxOut, 0, countSpentOutputs(ublock.Block()))
 	for _, leaf := range ublock.MsgUBlock().UtreexoData.Stxos {
 		stxo := SpentTxOut{
 			Amount:     leaf.Amt,
@@ -736,6 +735,14 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock,
 		// Add the block hash and height to the block index which tracks
 		// the main chain.
 		err = dbPutBlockIndex(dbTx, ublock.Hash(), node.height)
+		if err != nil {
+			return err
+		}
+
+		// Update the utxo set using the state of the utxo view.  This
+		// entails removing all of the utxos spent and adding the new
+		// ones created by the block.
+		err = dbPutUtxoView(dbTx, view)
 		if err != nil {
 			return err
 		}
@@ -1321,7 +1328,7 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 	return err == nil, err
 }
 
-// connectBestChain handles connecting the passed block to the chain while
+// connectBestChainUBlock handles connecting the passed ublock to the chain while
 // respecting proper chain selection according to the chain with the most
 // proof of work.  In the typical case, the new block simply extends the main
 // chain.  However, it may also be extending (or creating) a side chain (fork)
@@ -1361,9 +1368,9 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		view := NewUtxoViewpoint()
 		view.SetBestHash(parentHash)
 
-		//stxos := make([]SpentTxOut, 0, countSpentOutputs(block))
+		stxos := make([]SpentTxOut, 0, countSpentOutputs(ublock.Block()))
 		if !fastAdd {
-			err := b.checkConnectUBlock(node, ublock, view)
+			err := b.checkConnectUBlock(node, ublock, view, &stxos)
 			if err == nil {
 				b.index.SetStatusFlags(node, statusValid)
 			} else if _, ok := err.(RuleError); ok {
@@ -1384,7 +1391,16 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		// utxos, spend them, and add the new utxos being created by
 		// this block.
 		if fastAdd {
-			err := view.UBlockToUtxoView(*ublock)
+			err := view.fetchInputUtxos(b.db, ublock.Block())
+			if err != nil {
+				return false, err
+			}
+			err = view.connectTransactions(ublock.Block(), &stxos)
+			if err != nil {
+				return false, err
+			}
+
+			err = view.UBlockToUtxoView(*ublock)
 			if err != nil {
 				return false, err
 			}
@@ -1392,10 +1408,11 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 			if err != nil {
 				return false, err
 			}
+
 		}
 
 		// Connect the block to the main chain.
-		err := b.connectUBlock(node, ublock) //, view, stxos)
+		err := b.connectUBlock(node, ublock, stxos, view)
 		if err != nil {
 			// If we got hit with a rule error, then we'll mark
 			// that status of the block as invalid and flush the
@@ -2030,10 +2047,11 @@ func New(config *Config) (*BlockChain, error) {
 		utreexoLookAhead:    config.UtreexoLookAhead,
 	}
 
-	//if config.UtreexoCSN {
-	//	b.db = nil
-	//	//b.utreexoLookAhead = config.UtreexoLookAhead
-	//}
+	if config.UtreexoCSN {
+		//b.db = nil
+		b.utreexoLookAhead = config.UtreexoLookAhead
+		b.utreexoViewpoint = NewUtreexoViewpoint()
+	}
 
 	// Initialize the chain state from the passed database.  When the db
 	// does not yet contain any chain state, both it and the chain state

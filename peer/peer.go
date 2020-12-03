@@ -153,6 +153,8 @@ type MessageListeners struct {
 	// message.
 	OnGetBlocks func(p *Peer, msg *wire.MsgGetBlocks)
 
+	OnGetUBlocks func(p *Peer, msg *wire.MsgGetUBlocks)
+
 	// OnGetHeaders is invoked when a peer receives a getheaders bitcoin
 	// message.
 	OnGetHeaders func(p *Peer, msg *wire.MsgGetHeaders)
@@ -614,6 +616,8 @@ func (p *Peer) Services() wire.ServiceFlag {
 	services := p.services
 	p.flagsMtx.Unlock()
 
+	fmt.Println("services:", services)
+
 	return services
 }
 
@@ -858,6 +862,7 @@ func (p *Peer) PushAddrMsg(addresses []*wire.NetAddress) ([]*wire.NetAddress, er
 //
 // This function is safe for concurrent access.
 func (p *Peer) PushGetBlocksMsg(locator blockchain.BlockLocator, stopHash *chainhash.Hash) error {
+	fmt.Println("PUSHING GET BLOCKS")
 	// Extract the begin hash from the block locator, if one was specified,
 	// to use for filtering duplicate getblocks requests.
 	var beginHash *chainhash.Hash
@@ -880,6 +885,51 @@ func (p *Peer) PushGetBlocksMsg(locator blockchain.BlockLocator, stopHash *chain
 
 	// Construct the getblocks request and queue it to be sent.
 	msg := wire.NewMsgGetBlocks(stopHash)
+	for _, hash := range locator {
+		err := msg.AddBlockLocatorHash(hash)
+		if err != nil {
+			return err
+		}
+	}
+	p.QueueMessage(msg, nil)
+
+	// Update the previous getblocks request information for filtering
+	// duplicates.
+	p.prevGetBlocksMtx.Lock()
+	p.prevGetBlocksBegin = beginHash
+	p.prevGetBlocksStop = stopHash
+	p.prevGetBlocksMtx.Unlock()
+	return nil
+}
+
+// PushGetUBlocksMsg sends a getblocks message for the provided block locator
+// and stop hash.  It will ignore back-to-back duplicate requests.
+//
+// This function is safe for concurrent access.
+func (p *Peer) PushGetUBlocksMsg(locator blockchain.BlockLocator, stopHash *chainhash.Hash) error {
+	fmt.Println("PUSHING GET UBLOCKS")
+	// Extract the begin hash from the block locator, if one was specified,
+	// to use for filtering duplicate getblocks requests.
+	var beginHash *chainhash.Hash
+	if len(locator) > 0 {
+		beginHash = locator[0]
+	}
+
+	// Filter duplicate getblocks requests.
+	p.prevGetBlocksMtx.Lock()
+	isDuplicate := p.prevGetBlocksStop != nil && p.prevGetBlocksBegin != nil &&
+		beginHash != nil && stopHash.IsEqual(p.prevGetBlocksStop) &&
+		beginHash.IsEqual(p.prevGetBlocksBegin)
+	p.prevGetBlocksMtx.Unlock()
+
+	if isDuplicate {
+		log.Tracef("Filtering duplicate [getblocks] with begin "+
+			"hash %v, stop hash %v", beginHash, stopHash)
+		return nil
+	}
+
+	// Construct the getblocks request and queue it to be sent.
+	msg := wire.NewMsgGetUBlocks(stopHash)
 	for _, hash := range locator {
 		err := msg.AddBlockLocatorHash(hash)
 		if err != nil {
@@ -1048,6 +1098,7 @@ func (p *Peer) readMessage(encoding wire.MessageEncoding) (wire.Message, []byte,
 
 // writeMessage sends a bitcoin message to the peer with logging.
 func (p *Peer) writeMessage(msg wire.Message, enc wire.MessageEncoding) error {
+	fmt.Println("WRITE MESSAGE")
 	// Don't do anything if we're disconnecting.
 	if atomic.LoadInt32(&p.disconnect) != 0 {
 		return nil
@@ -1072,6 +1123,7 @@ func (p *Peer) writeMessage(msg wire.Message, enc wire.MessageEncoding) error {
 		_, err := wire.WriteMessageWithEncodingN(&buf, msg, p.ProtocolVersion(),
 			p.cfg.ChainParams.Net, enc)
 		if err != nil {
+			fmt.Println("ERR", err)
 			return err.Error()
 		}
 		return spew.Sdump(buf.Bytes())
@@ -1343,6 +1395,7 @@ out:
 		rmsg, buf, err := p.readMessage(p.wireEncoding)
 		idleTimer.Stop()
 		if err != nil {
+			fmt.Println("ERR", err)
 			// In order to allow regression tests with malformed messages, don't
 			// disconnect the peer when we're in regression test mode and the
 			// error is one of the allowed errors.
@@ -1431,11 +1484,14 @@ out:
 			}
 
 		case *wire.MsgBlock:
+			fmt.Println("CASE MSGBLOCK")
 			if p.cfg.Listeners.OnBlock != nil {
 				p.cfg.Listeners.OnBlock(p, msg, buf)
 			}
 		case *wire.MsgUBlock:
+			fmt.Println("CASE MSGUBLOCK")
 			if p.cfg.Listeners.OnUBlock != nil {
+				fmt.Println("HI")
 				p.cfg.Listeners.OnUBlock(p, msg, buf)
 			}
 
@@ -1736,6 +1792,7 @@ out:
 
 			err := p.writeMessage(msg.msg, msg.encoding)
 			if err != nil {
+				fmt.Println("ERRRRRR", err)
 				p.Disconnect()
 				if p.shouldLogWriteError(err) {
 					log.Errorf("Failed to send message to "+
@@ -1822,7 +1879,6 @@ func (p *Peer) QueueMessage(msg wire.Message, doneChan chan<- struct{}) {
 // This function is safe for concurrent access.
 func (p *Peer) QueueMessageWithEncoding(msg wire.Message, doneChan chan<- struct{},
 	encoding wire.MessageEncoding) {
-
 	// Avoid risk of deadlock if goroutine already exited.  The goroutine
 	// we will be sending to hangs around until it knows for a fact that
 	// it is marked as disconnected and *then* it drains the channels.

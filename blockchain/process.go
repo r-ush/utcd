@@ -244,13 +244,14 @@ func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bo
 }
 
 func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, bool, error) {
+	fmt.Println("PROCESS UBLOCK")
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 
 	fastAdd := flags&BFFastAdd == BFFastAdd
 
 	blockHash := ublock.Hash()
-	log.Tracef("Processing block %v", blockHash)
+	log.Tracef("Processing ublock %v", blockHash)
 
 	// The block must not already exist in the main chain or side chains.
 	exists, err := b.blockExists(blockHash)
@@ -258,13 +259,13 @@ func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) 
 		return false, false, err
 	}
 	if exists {
-		str := fmt.Sprintf("already have block %v", blockHash)
+		str := fmt.Sprintf("already have ublock %v", blockHash)
 		return false, false, ruleError(ErrDuplicateBlock, str)
 	}
 
 	// The block must not already exist as an orphan.
 	if _, exists := b.orphans[*blockHash]; exists {
-		str := fmt.Sprintf("already have block (orphan) %v", blockHash)
+		str := fmt.Sprintf("already have ublock (orphan) %v", blockHash)
 		return false, false, ruleError(ErrDuplicateBlock, str)
 	}
 
@@ -273,6 +274,7 @@ func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) 
 	if err != nil {
 		return false, false, err
 	}
+	fmt.Println("SANITY PASS")
 
 	// Find the previous checkpoint and perform some additional checks based
 	// on the checkpoint.  This provides a few nice properties such as

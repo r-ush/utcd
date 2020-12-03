@@ -35,6 +35,7 @@ func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
 }
 
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
+	fmt.Println(uview)
 	err := uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
 	if err != nil {
 		return err
@@ -46,7 +47,7 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 		remember[i] = ttl < uview.accumulator.Lookahead
 	}
 
-	inskip, outskip := DedupeBlock(ub.MsgUBlock().MsgBlock)
+	inskip, outskip := DedupeBlock(&ub.MsgUBlock().MsgBlock)
 
 	nl, h := uview.accumulator.ReconstructStats()
 
@@ -56,7 +57,7 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 			"uData missing utxo data for block %d err: %e", ub.MsgUBlock().UtreexoData.Height, err)
 	}
 
-	leaves := BlockToAddLeaves(*ub.MsgUBlock().MsgBlock, remember, outskip, ub.MsgUBlock().UtreexoData.Height)
+	leaves := BlockToAddLeaves(ub.MsgUBlock().MsgBlock, remember, outskip, ub.MsgUBlock().UtreexoData.Height)
 
 	uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
 
@@ -194,4 +195,11 @@ func BlockToAddLeaves(blk wire.MsgBlock,
 		}
 	}
 	return
+}
+
+func NewUtreexoViewpoint() *UtreexoViewpoint {
+	return &UtreexoViewpoint{
+		entries:     make(map[chainhash.Hash]*btcacc.LeafData),
+		accumulator: accumulator.Pollard{},
+	}
 }
