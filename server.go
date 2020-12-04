@@ -2993,6 +2993,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 			AddrIndex:    s.addrIndex,
 			CfIndex:      s.cfIndex,
 			FeeEstimator: s.feeEstimator,
+			UtreexoCSN:   cfg.UtreexoCSN,
 		})
 		if err != nil {
 			return nil, err

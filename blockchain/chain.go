@@ -771,6 +771,9 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, stxo
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 
 	// This node is now the end of the best chain.
 	b.bestChain.SetTip(node)

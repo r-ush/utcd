@@ -1752,46 +1752,51 @@ func (sm *SyncManager) handleBlockchainNotification(notification *blockchain.Not
 
 	// A block has been connected to the main block chain.
 	case blockchain.NTBlockConnected:
-		//var ok bool
-		//if sm.utreexoCSN {
-		//	ublock, ok = notification.Data.(*btcutil.UBlock)
-		//} else {
-		//	block, ok = notification.Data.(*btcutil.Block)
-		//}
-		//if !ok {
-		//	log.Warnf("Chain connected notification is not a block.")
-		//	break
-		//}
+		var ok bool
+		//var ublock *btcutil.UBlock
+		var block *btcutil.Block
 
-		//// Remove all of the transactions (except the coinbase) in the
-		//// connected block from the transaction pool.  Secondly, remove any
-		//// transactions which are now double spends as a result of these
-		//// new transactions.  Finally, remove any transaction that is
-		//// no longer an orphan. Transactions which depend on a confirmed
-		//// transaction are NOT removed recursively because they are still
-		//// valid.
-		//for _, tx := range block.Transactions()[1:] {
-		//	sm.txMemPool.RemoveTransaction(tx, false)
-		//	sm.txMemPool.RemoveDoubleSpends(tx)
-		//	sm.txMemPool.RemoveOrphan(tx)
-		//	sm.peerNotifier.TransactionConfirmed(tx)
-		//	acceptedTxs := sm.txMemPool.ProcessOrphans(tx)
-		//	sm.peerNotifier.AnnounceNewTransactions(acceptedTxs)
-		//}
+		if sm.utreexoCSN {
+			_, ok = notification.Data.(*btcutil.UBlock)
+		} else {
+			block, ok = notification.Data.(*btcutil.Block)
+		}
+		if !ok {
+			log.Warnf("Chain connected notification is not a block.")
+			break
+		}
 
-		//// Register block with the fee estimator, if it exists.
-		//if sm.feeEstimator != nil {
-		//	err := sm.feeEstimator.RegisterBlock(block)
+		// Remove all of the transactions (except the coinbase) in the
+		// connected block from the transaction pool.  Secondly, remove any
+		// transactions which are now double spends as a result of these
+		// new transactions.  Finally, remove any transaction that is
+		// no longer an orphan. Transactions which depend on a confirmed
+		// transaction are NOT removed recursively because they are still
+		// valid.
+		if !sm.utreexoCSN {
+			for _, tx := range block.Transactions()[1:] {
+				sm.txMemPool.RemoveTransaction(tx, false)
+				sm.txMemPool.RemoveDoubleSpends(tx)
+				sm.txMemPool.RemoveOrphan(tx)
+				sm.peerNotifier.TransactionConfirmed(tx)
+				acceptedTxs := sm.txMemPool.ProcessOrphans(tx)
+				sm.peerNotifier.AnnounceNewTransactions(acceptedTxs)
+			}
 
-		//	// If an error is somehow generated then the fee estimator
-		//	// has entered an invalid state. Since it doesn't know how
-		//	// to recover, create a new one.
-		//	if err != nil {
-		//		sm.feeEstimator = mempool.NewFeeEstimator(
-		//			mempool.DefaultEstimateFeeMaxRollback,
-		//			mempool.DefaultEstimateFeeMinRegisteredBlocks)
-		//	}
-		//}
+			// Register block with the fee estimator, if it exists.
+			if sm.feeEstimator != nil {
+				err := sm.feeEstimator.RegisterBlock(block)
+
+				// If an error is somehow generated then the fee estimator
+				// has entered an invalid state. Since it doesn't know how
+				// to recover, create a new one.
+				if err != nil {
+					sm.feeEstimator = mempool.NewFeeEstimator(
+						mempool.DefaultEstimateFeeMaxRollback,
+						mempool.DefaultEstimateFeeMinRegisteredBlocks)
+				}
+			}
+		}
 
 	// A block has been disconnected from the main block chain.
 	case blockchain.NTBlockDisconnected:

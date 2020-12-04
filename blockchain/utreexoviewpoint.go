@@ -35,11 +35,11 @@ func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
 }
 
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
-	fmt.Println(uview)
 	err := uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
 	if err != nil {
 		return err
 	}
+	fmt.Println("UTREEXO PROOF VERIFIED", uview.accumulator)
 
 	remember := make([]bool, len(ub.MsgUBlock().UtreexoData.TxoTTLs))
 	for i, ttl := range ub.MsgUBlock().UtreexoData.TxoTTLs {
@@ -61,6 +61,7 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 
 	uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
 
+	fmt.Println("ACC STATE", uview.accumulator)
 	return nil
 }
 
