@@ -18,8 +18,8 @@ import (
 
 type UtreexoViewpoint struct {
 	accumulator accumulator.Pollard
-	entries     map[chainhash.Hash]*btcacc.LeafData
-	bestHash    chainhash.Hash
+	//entries     map[chainhash.Hash]*btcacc.LeafData
+	bestHash chainhash.Hash
 }
 
 // BestHash returns the hash of the best block in the chain the view currently
@@ -39,11 +39,10 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("UTREEXO PROOF VERIFIED", uview.accumulator)
+	//fmt.Println("UTREEXO PROOF VERIFIED", uview.accumulator)
 
 	remember := make([]bool, len(ub.MsgUBlock().UtreexoData.TxoTTLs))
 	for i, ttl := range ub.MsgUBlock().UtreexoData.TxoTTLs {
-		// ttl-ub.Height is the number of blocks until the block is spend.
 		remember[i] = ttl < uview.accumulator.Lookahead
 	}
 
@@ -59,41 +58,17 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 
 	leaves := BlockToAddLeaves(ub.MsgUBlock().MsgBlock, remember, outskip, ub.MsgUBlock().UtreexoData.Height)
 
-	uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
-
-	fmt.Println("ACC STATE", uview.accumulator)
-	return nil
-}
-
-/*
-// ProofSanity checks the consistency of a UBlock.  Does the proof prove
-// all the inputs in the block?
-func (ub *UBlock) ProofSanity(inputSkipList []uint32, nl uint64, h uint8) error {
-	// get the outpoints that need proof
-	proveOPs := util.BlockToDelOPs(&ub.Block, inputSkipList)
-
-	// ensure that all outpoints are provided in the extradata
-	if len(proveOPs) != len(ub.UtreexoData.Stxos) {
-		err := fmt.Errorf("height %d %d outpoints need proofs but only %d proven\n",
-			ub.UtreexoData.Height, len(proveOPs), len(ub.UtreexoData.Stxos))
+	err = uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
+	if err != nil {
 		return err
 	}
-	for i, _ := range ub.UtreexoData.Stxos {
-		if btcacc.Hash(proveOPs[i].Hash) != ub.UtreexoData.Stxos[i].TxHash ||
-			proveOPs[i].Index != ub.UtreexoData.Stxos[i].Index {
-			err := fmt.Errorf("block/utxoData mismatch %s v %s\n",
-				proveOPs[i].String(), ub.UtreexoData.Stxos[i].OPString())
-			return err
-		}
-	}
-	// derive leafHashes from leafData
-	if !ub.UtreexoData.ProofSanity(nl, h) {
-		return fmt.Errorf("height %d LeafData / Proof mismatch", ub.UtreexoData.Height)
-	}
 
+	uview.bestHash = *ub.Hash()
+
+	//fmt.Println("ACC STATE", ub.MsgUBlock().UtreexoData.Height)
+	//fmt.Println(uview.accumulator.ToString())
 	return nil
 }
-*/
 
 // DedupeBlock takes a bitcoin block, and returns two int slices: the indexes of
 // inputs, and idexes of outputs which can be removed.  These are indexes
@@ -101,7 +76,6 @@ func (ub *UBlock) ProofSanity(inputSkipList []uint32, nl uint64, h uint8) error 
 // So the coinbase tx in & output numbers affect the skip lists even though
 // the coinbase ins/outs can never be deduped.  it's simpler that way.
 func DedupeBlock(blk *wire.MsgBlock) (inskip []uint32, outskip []uint32) {
-
 	var i uint32
 	// wire.Outpoints are comparable with == which is nice.
 	inmap := make(map[wire.OutPoint]uint32)
@@ -200,7 +174,7 @@ func BlockToAddLeaves(blk wire.MsgBlock,
 
 func NewUtreexoViewpoint() *UtreexoViewpoint {
 	return &UtreexoViewpoint{
-		entries:     make(map[chainhash.Hash]*btcacc.LeafData),
+		//entries:     make(map[chainhash.Hash]*btcacc.LeafData),
 		accumulator: accumulator.Pollard{},
 	}
 }

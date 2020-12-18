@@ -616,8 +616,6 @@ func (p *Peer) Services() wire.ServiceFlag {
 	services := p.services
 	p.flagsMtx.Unlock()
 
-	fmt.Println("services:", services)
-
 	return services
 }
 
@@ -862,7 +860,6 @@ func (p *Peer) PushAddrMsg(addresses []*wire.NetAddress) ([]*wire.NetAddress, er
 //
 // This function is safe for concurrent access.
 func (p *Peer) PushGetBlocksMsg(locator blockchain.BlockLocator, stopHash *chainhash.Hash) error {
-	fmt.Println("PUSHING GET BLOCKS")
 	// Extract the begin hash from the block locator, if one was specified,
 	// to use for filtering duplicate getblocks requests.
 	var beginHash *chainhash.Hash
@@ -907,7 +904,6 @@ func (p *Peer) PushGetBlocksMsg(locator blockchain.BlockLocator, stopHash *chain
 //
 // This function is safe for concurrent access.
 func (p *Peer) PushGetUBlocksMsg(locator blockchain.BlockLocator, stopHash *chainhash.Hash) error {
-	fmt.Println("PUSHING GET UBLOCKS")
 	// Extract the begin hash from the block locator, if one was specified,
 	// to use for filtering duplicate getblocks requests.
 	var beginHash *chainhash.Hash
@@ -1098,7 +1094,6 @@ func (p *Peer) readMessage(encoding wire.MessageEncoding) (wire.Message, []byte,
 
 // writeMessage sends a bitcoin message to the peer with logging.
 func (p *Peer) writeMessage(msg wire.Message, enc wire.MessageEncoding) error {
-	fmt.Println("WRITE MESSAGE")
 	// Don't do anything if we're disconnecting.
 	if atomic.LoadInt32(&p.disconnect) != 0 {
 		return nil
@@ -1123,7 +1118,6 @@ func (p *Peer) writeMessage(msg wire.Message, enc wire.MessageEncoding) error {
 		_, err := wire.WriteMessageWithEncodingN(&buf, msg, p.ProtocolVersion(),
 			p.cfg.ChainParams.Net, enc)
 		if err != nil {
-			fmt.Println("ERR", err)
 			return err.Error()
 		}
 		return spew.Sdump(buf.Bytes())
@@ -1216,6 +1210,7 @@ func (p *Peer) maybeAddDeadline(pendingResponses map[string]time.Time, msgCmd st
 	case wire.CmdGetData:
 		// Expects a block, merkleblock, tx, or notfound message.
 		pendingResponses[wire.CmdBlock] = deadline
+		pendingResponses[wire.CmdUBlock] = deadline
 		pendingResponses[wire.CmdMerkleBlock] = deadline
 		pendingResponses[wire.CmdTx] = deadline
 		pendingResponses[wire.CmdNotFound] = deadline
@@ -1273,12 +1268,15 @@ out:
 				switch msgCmd := msg.message.Command(); msgCmd {
 				case wire.CmdBlock:
 					fallthrough
+				case wire.CmdUBlock:
+					fallthrough
 				case wire.CmdMerkleBlock:
 					fallthrough
 				case wire.CmdTx:
 					fallthrough
 				case wire.CmdNotFound:
 					delete(pendingResponses, wire.CmdBlock)
+					delete(pendingResponses, wire.CmdUBlock)
 					delete(pendingResponses, wire.CmdMerkleBlock)
 					delete(pendingResponses, wire.CmdTx)
 					delete(pendingResponses, wire.CmdNotFound)
@@ -1395,7 +1393,6 @@ out:
 		rmsg, buf, err := p.readMessage(p.wireEncoding)
 		idleTimer.Stop()
 		if err != nil {
-			fmt.Println("ERR", err)
 			// In order to allow regression tests with malformed messages, don't
 			// disconnect the peer when we're in regression test mode and the
 			// error is one of the allowed errors.
@@ -1484,14 +1481,11 @@ out:
 			}
 
 		case *wire.MsgBlock:
-			fmt.Println("CASE MSGBLOCK")
 			if p.cfg.Listeners.OnBlock != nil {
 				p.cfg.Listeners.OnBlock(p, msg, buf)
 			}
 		case *wire.MsgUBlock:
-			fmt.Println("CASE MSGUBLOCK")
 			if p.cfg.Listeners.OnUBlock != nil {
-				fmt.Println("HI")
 				p.cfg.Listeners.OnUBlock(p, msg, buf)
 			}
 
@@ -1792,7 +1786,6 @@ out:
 
 			err := p.writeMessage(msg.msg, msg.encoding)
 			if err != nil {
-				fmt.Println("ERRRRRR", err)
 				p.Disconnect()
 				if p.shouldLogWriteError(err) {
 					log.Errorf("Failed to send message to "+

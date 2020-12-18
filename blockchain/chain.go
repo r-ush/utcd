@@ -752,6 +752,11 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, stxo
 			return err
 		}
 
+		err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, *ublock.Hash())
+		if err != nil {
+			return err
+		}
+
 		// Update the transaction spend journal by adding a record for
 		// the block that contains all txos spent by it.
 		err = dbPutSpendJournalEntry(dbTx, ublock.Hash(), stxos)
@@ -1403,15 +1408,14 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 				return false, err
 			}
 
-			err = view.UBlockToUtxoView(*ublock)
-			if err != nil {
-				return false, err
-			}
-			err = b.utreexoViewpoint.Modify(ublock)
-			if err != nil {
-				return false, err
-			}
-
+			//err = view.UBlockToUtxoView(*ublock)
+			//if err != nil {
+			//	return false, err
+			//}
+			//err = b.utreexoViewpoint.Modify(ublock)
+			//if err != nil {
+			//	return false, err
+			//}
 		}
 
 		// Connect the block to the main chain.
@@ -2051,9 +2055,9 @@ func New(config *Config) (*BlockChain, error) {
 	}
 
 	if config.UtreexoCSN {
-		//b.db = nil
 		b.utreexoLookAhead = config.UtreexoLookAhead
-		b.utreexoViewpoint = NewUtreexoViewpoint()
+		b.utreexoCSN = config.UtreexoCSN
+		//b.utreexoViewpoint = NewUtreexoViewpoint()
 	}
 
 	// Initialize the chain state from the passed database.  When the db

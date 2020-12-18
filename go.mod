@@ -13,10 +13,11 @@ require (
 	github.com/decred/dcrd/lru v1.0.0
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
-	github.com/mit-dci/utreexo v0.0.0-00010101000000-000000000000
+	github.com/mit-dci/utreexo v0.0.0-20201203041934-1a03a98e9424
+	github.com/syndtr/goleveldb v1.0.0
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 )
 
-replace github.com/mit-dci/utreexo => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/mit-dci/utreexo
+replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d
 
-replace github.com/btcsuite/btcutil => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/btcsuite/btcutil
+replace github.com/mit-dci/utreexo => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/mit-dci/utreexo

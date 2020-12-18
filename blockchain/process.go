@@ -244,7 +244,6 @@ func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bo
 }
 
 func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, bool, error) {
-	fmt.Println("PROCESS UBLOCK")
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 
@@ -274,7 +273,6 @@ func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) 
 	if err != nil {
 		return false, false, err
 	}
-	fmt.Println("SANITY PASS")
 
 	// Find the previous checkpoint and perform some additional checks based
 	// on the checkpoint.  This provides a few nice properties such as

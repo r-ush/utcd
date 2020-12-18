@@ -437,7 +437,6 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 	wantServices := wire.SFNodeNetwork
 
 	if sp.server.services&wire.SFNodeUtreexo == wire.SFNodeUtreexo {
-		fmt.Println("WANT UTREEXO")
 		wantServices &^= wire.SFNodeUtreexo
 	}
 	if !isInbound && !hasServices(msg.Services, wantServices) {

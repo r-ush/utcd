@@ -6,7 +6,6 @@ package netsync
 
 import (
 	"container/list"
-	"fmt"
 	"math/rand"
 	"net"
 	"sync"
@@ -387,7 +386,6 @@ func (sm *SyncManager) startSync() {
 				sm.nextCheckpoint.Height, bestPeer.Addr())
 		} else {
 			if sm.utreexoCSN {
-				fmt.Println("PUSHGETUBLOCKS")
 				bestPeer.PushGetUBlocksMsg(locator, &zeroHash)
 			} else {
 				bestPeer.PushGetBlocksMsg(locator, &zeroHash)
@@ -402,8 +400,6 @@ func (sm *SyncManager) startSync() {
 	} else {
 		log.Warnf("No sync peer candidates available")
 	}
-
-	fmt.Println("RETURN STARTSYNC")
 }
 
 // isSyncCandidate returns whether or not the peer is a candidate to consider
@@ -462,10 +458,8 @@ func (sm *SyncManager) handleNewPeerMsg(peer *peerpkg.Peer) {
 		requestedBlocks: make(map[chainhash.Hash]struct{}),
 	}
 
-	fmt.Println("HIHI")
 	// Start syncing by choosing the best candidate if needed.
 	if isSyncCandidate && sm.syncPeer == nil {
-		fmt.Println("START SYNC")
 		sm.startSync()
 	}
 }
@@ -475,7 +469,6 @@ func (sm *SyncManager) handleNewPeerMsg(peer *peerpkg.Peer) {
 // the current time, and disconnecting the peer if we stalled before reaching
 // their highest advertised block.
 func (sm *SyncManager) handleStallSample() {
-	fmt.Println("HANDLESTALLSMALPLE")
 	if atomic.LoadInt32(&sm.shutdown) != 0 {
 		return
 	}
@@ -889,7 +882,6 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 // TODO kcalvinalvin: It's really mostly the same procedure with a regular block
 // This isn't the prettiest way
 func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
-	fmt.Println("UBLOCK MSG")
 	peer := ubmsg.peer
 	state, exists := sm.peerStates[peer]
 	if !exists {
@@ -1009,7 +1001,6 @@ func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
 			log.Warnf("Failed to get block locator for the "+
 				"latest block: %v", err)
 		} else {
-			fmt.Println("GETUBLOCKSMSG")
 			peer.PushGetUBlocksMsg(locator, orphanRoot)
 		}
 	} else {
@@ -1102,7 +1093,6 @@ func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
 // fetchHeaderBlocks creates and sends a request to the syncPeer for the next
 // list of blocks to be downloaded based on the current list of headers.
 func (sm *SyncManager) fetchHeaderBlocks() {
-	fmt.Println("FETCHHEADERBLOCKS")
 	// Nothing to do if there is no start header.
 	if sm.startHeader == nil {
 		log.Warnf("fetchHeaderBlocks called with no start header")
@@ -1157,7 +1147,6 @@ func (sm *SyncManager) fetchHeaderBlocks() {
 // fetchHeaderUBlocks creates and sends a request to the syncPeer for the next
 // list of blocks to be downloaded based on the current list of headers.
 func (sm *SyncManager) fetchHeaderUBlocks() {
-	fmt.Println("FETCHHEADERUBLOCKS")
 	// Nothing to do if there is no start header.
 	if sm.startHeader == nil {
 		log.Warnf("fetchHeaderUBlocks called with no start header")
@@ -1176,7 +1165,6 @@ func (sm *SyncManager) fetchHeaderUBlocks() {
 			continue
 		}
 
-		//fmt.Println("NEW INV")
 		iv := wire.NewInvVect(wire.InvTypeUBlock, node.hash)
 		haveInv, err := sm.haveInventory(iv)
 		if err != nil {
@@ -1211,7 +1199,6 @@ func (sm *SyncManager) fetchHeaderUBlocks() {
 		}
 	}
 	if len(gdmsg.InvList) > 0 {
-		fmt.Println("QUEUE INV MESG")
 		sm.syncPeer.QueueMessage(gdmsg, nil)
 	}
 }
@@ -1219,16 +1206,13 @@ func (sm *SyncManager) fetchHeaderUBlocks() {
 // handleHeadersMsg handles block header messages from all peers.  Headers are
 // requested when performing a headers-first sync.
 func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
-	fmt.Println("HANDLE HEADERS MSG")
 	peer := hmsg.peer
 	_, exists := sm.peerStates[peer]
 	if !exists {
-		fmt.Println("HANDLE HEADERS MSG 00")
 		log.Warnf("Received headers message from unknown peer %s", peer)
 		return
 	}
 
-	fmt.Println("HANDLE HEADERS MSG 11")
 	// The remote peer is misbehaving if we didn't request headers.
 	msg := hmsg.headers
 	numHeaders := len(msg.Headers)
@@ -1238,11 +1222,9 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 		peer.Disconnect()
 		return
 	}
-	fmt.Println("HANDLE HEADERS MSG 22")
 
 	// Nothing to do for an empty headers message.
 	if numHeaders == 0 {
-		fmt.Println("0 headers")
 		return
 	}
 
@@ -1267,8 +1249,6 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 		// add it to the list of headers.
 		node := headerNode{hash: &blockHash}
 		prevNode := prevNodeEl.Value.(*headerNode)
-		//fmt.Println("PREV", prevNode.hash)
-		//fmt.Println("CUR", &blockHeader.PrevBlock)
 		if prevNode.hash.IsEqual(&blockHeader.PrevBlock) {
 			node.height = prevNode.height + 1
 			e := sm.headerList.PushBack(&node)
@@ -1307,7 +1287,6 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 	// When this header is a checkpoint, switch to fetching the blocks for
 	// all of the headers since the last checkpoint.
 	if receivedCheckpoint {
-		fmt.Println("FETCH HEADER BLOCKS")
 		// Since the first entry of the list is always the final block
 		// that is already in the database and is only used to ensure
 		// the next header links properly, it must be removed before
@@ -1328,7 +1307,6 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 	// headers starting from the latest known header and ending with the
 	// next checkpoint.
 	locator := blockchain.BlockLocator([]*chainhash.Hash{finalHash})
-	fmt.Println("PUSH GET HEADERS MSG")
 	err := peer.PushGetHeadersMsg(locator, sm.nextCheckpoint.Hash)
 	if err != nil {
 		log.Warnf("Failed to send getheaders message to "+
@@ -1424,7 +1402,6 @@ func (sm *SyncManager) haveInventory(invVect *wire.InvVect) (bool, error) {
 // handleInvMsg handles inv messages from all peers.
 // We examine the inventory advertised by the remote peer and act accordingly.
 func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
-	fmt.Println("HANDLE INV")
 	peer := imsg.peer
 	state, exists := sm.peerStates[peer]
 	if !exists {
@@ -1647,7 +1624,6 @@ out:
 				msg.reply <- struct{}{}
 
 			case *ublockMsg:
-				fmt.Println("HANDLE")
 				sm.handleUBlockMsg(msg)
 				msg.reply <- struct{}{}
 
@@ -1661,7 +1637,6 @@ out:
 				sm.handleNotFoundMsg(msg)
 
 			case *donePeerMsg:
-				fmt.Println("IN NETSYNC")
 				sm.handleDonePeerMsg(msg.peer)
 
 			case getSyncPeerMsg:
@@ -1686,8 +1661,6 @@ out:
 					err:      nil,
 				}
 			case processUBlockMsg:
-				fmt.Println("PROCESS UBLOCK MSG")
-
 				_, isOrphan, err := sm.chain.ProcessUBlock(
 					msg.ublock, msg.flags)
 				if err != nil {
@@ -1911,7 +1884,6 @@ func (sm *SyncManager) QueueNotFound(notFound *wire.MsgNotFound, peer *peerpkg.P
 
 // DonePeer informs the blockmanager that a peer has disconnected.
 func (sm *SyncManager) DonePeer(peer *peerpkg.Peer) {
-	fmt.Println("DONE PEER MSG")
 	// Ignore if we are shutting down.
 	if atomic.LoadInt32(&sm.shutdown) != 0 {
 		return

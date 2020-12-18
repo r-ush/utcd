@@ -12,30 +12,59 @@ type MsgUBlock struct {
 	UtreexoData btcacc.UData
 }
 
-func (ub *MsgUBlock) BlockHash() chainhash.Hash {
-	return ub.MsgBlock.BlockHash()
+func (msgu *MsgUBlock) BlockHash() chainhash.Hash {
+	return msgu.MsgBlock.BlockHash()
 }
 
-func (ub *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
-	ub.MsgBlock = MsgBlock{}
-	err := ub.MsgBlock.BtcDecode(r, pver, enc)
+func (msgu *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
+	msgu.MsgBlock = MsgBlock{}
+	err := msgu.MsgBlock.BtcDecode(r, pver, enc)
 	if err != nil {
 		return err
 	}
-	ub.UtreexoData = btcacc.UData{}
-	err = ub.UtreexoData.Deserialize(r)
+	msgu.UtreexoData = btcacc.UData{}
+	err = msgu.UtreexoData.Deserialize(r)
 
 	return nil
 }
 
-func (ub *MsgUBlock) BtcEncode(r io.Writer, pver uint32, enc MessageEncoding) error {
-	err := ub.MsgBlock.Serialize(r)
+// Deserialize a UBlock.  It's just a block then udata.
+func (msgu *MsgUBlock) Deserialize(r io.Reader) (err error) {
+	err = msgu.Deserialize(r)
 	if err != nil {
 		return err
 	}
-	err = ub.UtreexoData.Serialize(r)
+
+	err = msgu.UtreexoData.Deserialize(r)
+	return
+}
+
+func (msgu *MsgUBlock) BtcEncode(r io.Writer, pver uint32, enc MessageEncoding) error {
+	err := msgu.MsgBlock.BtcEncode(r, pver, enc)
+	if err != nil {
+		return err
+	}
+	err = msgu.UtreexoData.Serialize(r)
 
 	return nil
+}
+
+func (msgu *MsgUBlock) Serialize(w io.Writer) (err error) {
+	err = msgu.Serialize(w)
+	if err != nil {
+		return
+	}
+	err = msgu.UtreexoData.Serialize(w)
+	return
+}
+
+func (msgu *MsgUBlock) SerializeNoWitness(w io.Writer) error {
+	return msgu.BtcEncode(w, 0, BaseEncoding)
+}
+
+// SerializeSize: how big is it, in bytes.
+func (msgb *MsgUBlock) SerializeSize() int {
+	return msgb.MsgBlock.SerializeSize() + msgb.UtreexoData.SerializeSize()
 }
 
 // Command returns the protocol command string for the message.  This is part
