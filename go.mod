@@ -18,6 +18,7 @@ require (
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 )
 
-replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d
+//replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d
+replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4
 
 replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20201218052829-ceb523cbaa73

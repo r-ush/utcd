@@ -45,6 +45,8 @@ github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23 h1:FOOIBWrEkLgmlgGfM
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6CZQHDETBtE9HaSEkGmuNXF86RwHhHUvq4=
 github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d h1:5TcJnD7MnA/ikpZf+HTs9ka5Ji/CKke2au3D6aggLIk=
 github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d/go.mod h1:tGhBaVqjZM9RAVpiUZtdqXWh2oVQ38ZgorCZ78vpPCo=
+github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4 h1:wRhAfOSqgjeSSgTYvI/SeeQWy+/cvMFFeYw0Pkmc1cE=
+github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4/go.mod h1:1+8kKl7a75bLh7vMw7gsY1w2ouBpRLYY0cmCMHWebWY=
 github.com/mit-dci/utreexo v0.0.0-20201116141530-092f6c9b8e67 h1:U5Om3SY8g7Kwd2yWZqfooGZA7dWWJrL159oxSxDuSII=
 github.com/mit-dci/utreexo v0.0.0-20201116141530-092f6c9b8e67/go.mod h1:sOjTy1VT+krgEwk71W/PztXnYkOM47r7IagMkhh/ioU=
 github.com/mit-dci/utreexo v0.0.0-20201203041934-1a03a98e9424 h1:n4T8YjFWUrVdZtRcydjPh7lY+BSdZuViIMoJQirLD4M=
