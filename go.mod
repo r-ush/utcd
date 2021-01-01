@@ -19,6 +19,8 @@ require (
 )
 
 //replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d
-replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4
+//replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4
+replace github.com/btcsuite/btcutil => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/mit-dci/utcutil
 
-replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20201218052829-ceb523cbaa73
+//replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20201218052829-ceb523cbaa73
+replace github.com/mit-dci/utreexo => /home/calvin/bitcoin-projects/go/utreexo/go/src/github.com/mit-dci/utreexo

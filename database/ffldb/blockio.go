@@ -587,6 +587,165 @@ func (s *blockStore) readBlockRegion(loc blockLocation, offset, numBytes uint32)
 	return serializedData, nil
 }
 
+func (s *blockStore) writeAccProof(rawProof []byte) (blockLocation, error) {
+	// Compute how many bytes will be written.
+	// 4 bytes each for block network + 4 bytes for block length +
+	// length of raw block + 4 bytes for checksum.
+	proofLen := uint32(len(rawProof))
+	fullLen := proofLen + 12
+
+	wc := s.writeCursor
+	finalOffset := wc.curOffset + fullLen
+	if finalOffset < wc.curOffset || finalOffset > s.maxBlockFileSize {
+		// This is done under the write cursor lock since the curFileNum
+		// field is accessed elsewhere by readers.
+		//
+		// Close the current write file to force a read-only reopen
+		// with LRU tracking.  The close is done under the write lock
+		// for the file to prevent it from being closed out from under
+		// any readers currently reading from it.
+		wc.Lock()
+		wc.curFile.Lock()
+		if wc.curFile.file != nil {
+			_ = wc.curFile.file.Close()
+			wc.curFile.file = nil
+		}
+		wc.curFile.Unlock()
+
+		// Start writes into next file.
+		wc.curFileNum++
+		wc.curOffset = 0
+		wc.Unlock()
+	}
+
+	// All writes are done under the write lock for the file to ensure any
+	// readers are finished and blocked first.
+	wc.curFile.Lock()
+	defer wc.curFile.Unlock()
+
+	// Open the current file if needed.  This will typically only be the
+	// case when moving to the next file to write to or on initial database
+	// load.  However, it might also be the case if rollbacks happened after
+	// file writes started during a transaction commit.
+	if wc.curFile.file == nil {
+		file, err := s.openWriteFileFunc(wc.curFileNum)
+		if err != nil {
+			return blockLocation{}, err
+		}
+		wc.curFile.file = file
+	}
+
+	// Bitcoin network.
+	origOffset := wc.curOffset
+	hasher := crc32.New(castagnoli)
+	var scratch [4]byte
+	byteOrder.PutUint32(scratch[:], uint32(s.network))
+	if err := s.writeData(scratch[:], "network"); err != nil {
+		return blockLocation{}, err
+	}
+	_, _ = hasher.Write(scratch[:])
+
+	// Proof length.
+	byteOrder.PutUint32(scratch[:], proofLen)
+	if err := s.writeData(scratch[:], "accproof length"); err != nil {
+		return blockLocation{}, err
+	}
+	_, _ = hasher.Write(scratch[:])
+
+	// Serialized block.
+	if err := s.writeData(rawProof, "accproof"); err != nil {
+		return blockLocation{}, err
+	}
+	_, _ = hasher.Write(rawProof)
+
+	// Castagnoli CRC-32 as a checksum of all the previous.
+	if err := s.writeData(hasher.Sum(nil), "checksum"); err != nil {
+		return blockLocation{}, err
+	}
+
+	loc := blockLocation{
+		blockFileNum: wc.curFileNum,
+		fileOffset:   origOffset,
+		blockLen:     fullLen,
+	}
+
+	return loc, nil
+}
+
+func (s *blockStore) readAccProof(hash *chainhash.Hash, loc blockLocation) ([]byte, error) {
+	// Get the referenced block file handle opening the file as needed.  The
+	// function also handles closing files as needed to avoid going over the
+	// max allowed open files.
+	accProofFile, err := s.blockFile(loc.blockFileNum)
+	if err != nil {
+		return nil, err
+	}
+
+	serializedData := make([]byte, loc.blockLen)
+	n, err := accProofFile.file.ReadAt(serializedData, int64(loc.fileOffset))
+	accProofFile.RUnlock()
+	if err != nil {
+		str := fmt.Sprintf("failed to read block %s from file %d, "+
+			"offset %d: %v", hash, loc.blockFileNum, loc.fileOffset,
+			err)
+		return nil, makeDbErr(database.ErrDriverSpecific, str, err)
+	}
+
+	// Calculate the checksum of the read data and ensure it matches the
+	// serialized checksum.  This will detect any data corruption in the
+	// flat file without having to do much more expensive merkle root
+	// calculations on the loaded block.
+	serializedChecksum := binary.BigEndian.Uint32(serializedData[n-4:])
+	calculatedChecksum := crc32.Checksum(serializedData[:n-4], castagnoli)
+	if serializedChecksum != calculatedChecksum {
+		str := fmt.Sprintf("block data for block %s checksum "+
+			"does not match - got %x, want %x", hash,
+			calculatedChecksum, serializedChecksum)
+		return nil, makeDbErr(database.ErrCorruption, str, nil)
+	}
+
+	// The network associated with the block must match the current active
+	// network, otherwise somebody probably put the block files for the
+	// wrong network in the directory.
+	serializedNet := byteOrder.Uint32(serializedData[:4])
+	if serializedNet != uint32(s.network) {
+		str := fmt.Sprintf("block data for block %s is for the "+
+			"wrong network - got %d, want %d", hash, serializedNet,
+			uint32(s.network))
+		return nil, makeDbErr(database.ErrDriverSpecific, str, nil)
+	}
+
+	// The raw block excludes the network, length of the block, and
+	// checksum.
+	return serializedData[8 : n-4], nil
+}
+
+func (s *blockStore) readAccProofRegion(loc blockLocation, offset, numBytes uint32) ([]byte, error) {
+	// Get the referenced block file handle opening the file as needed.  The
+	// function also handles closing files as needed to avoid going over the
+	// max allowed open files.
+	blockFile, err := s.blockFile(loc.blockFileNum)
+	if err != nil {
+		return nil, err
+	}
+
+	// Regions are offsets into the actual block, however the serialized
+	// data for a block includes an initial 4 bytes for network + 4 bytes
+	// for block length.  Thus, add 8 bytes to adjust.
+	readOffset := loc.fileOffset + 8 + offset
+	serializedData := make([]byte, numBytes)
+	_, err = blockFile.file.ReadAt(serializedData, int64(readOffset))
+	blockFile.RUnlock()
+	if err != nil {
+		str := fmt.Sprintf("failed to read accproof region from block file %d, "+
+			"offset %d, len %d: %v", loc.blockFileNum, readOffset,
+			numBytes, err)
+		return nil, makeDbErr(database.ErrDriverSpecific, str, err)
+	}
+
+	return serializedData, nil
+}
+
 // syncBlocks performs a file system sync on the flat file associated with the
 // store's current write cursor.  It is safe to call even when there is not a
 // current write file in which case it will have no effect.

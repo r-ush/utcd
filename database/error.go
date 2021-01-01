@@ -111,6 +111,14 @@ const (
 	// exists in the database.
 	ErrBlockExists
 
+	// ErrAccProofNotFound indicates that an utreexo accumulator proof with
+	// the provided hash does not exist in the database.
+	ErrAccProofNotFound
+
+	// ErrAccProofExists indicates that an utreexo accumulator proof with
+	// the provided hash already exists in the database.
+	ErrAccProofExists
+
 	// ErrBlockRegionInvalid indicates a region that exceeds the bounds of
 	// the specified block was requested.  When the hash provided by the
 	// region does not correspond to an existing block, the error will be
@@ -152,6 +160,8 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrIncompatibleValue:  "ErrIncompatibleValue",
 	ErrBlockNotFound:      "ErrBlockNotFound",
 	ErrBlockExists:        "ErrBlockExists",
+	ErrAccProofNotFound:   "ErrAccProofNotFound",
+	ErrAccProofExists:     "ErrAccProofExists",
 	ErrBlockRegionInvalid: "ErrBlockRegionInvalid",
 	ErrDriverSpecific:     "ErrDriverSpecific",
 }

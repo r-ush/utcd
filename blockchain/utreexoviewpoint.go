@@ -6,10 +6,8 @@ package blockchain
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
 	"github.com/mit-dci/utreexo/btcacc"
@@ -34,19 +32,19 @@ func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
 	uview.bestHash = *hash
 }
 
+// Modify takes an ublock and adds the utxos and deletes the stxos from the utreexo state
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 	err := uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
 	if err != nil {
 		return err
 	}
-	//fmt.Println("UTREEXO PROOF VERIFIED", uview.accumulator)
 
 	remember := make([]bool, len(ub.MsgUBlock().UtreexoData.TxoTTLs))
 	for i, ttl := range ub.MsgUBlock().UtreexoData.TxoTTLs {
 		remember[i] = ttl < uview.accumulator.Lookahead
 	}
 
-	inskip, outskip := DedupeBlock(&ub.MsgUBlock().MsgBlock)
+	inskip, outskip := DedupeBlock(ub.Block())
 
 	nl, h := uview.accumulator.ReconstructStats()
 
@@ -56,7 +54,7 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 			"uData missing utxo data for block %d err: %e", ub.MsgUBlock().UtreexoData.Height, err)
 	}
 
-	leaves := BlockToAddLeaves(ub.MsgUBlock().MsgBlock, remember, outskip, ub.MsgUBlock().UtreexoData.Height)
+	leaves := BlockToAddLeaves(ub.Block(), remember, outskip, ub.MsgUBlock().UtreexoData.Height)
 
 	err = uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
 	if err != nil {
@@ -65,79 +63,21 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 
 	uview.bestHash = *ub.Hash()
 
-	//fmt.Println("ACC STATE", ub.MsgUBlock().UtreexoData.Height)
-	//fmt.Println(uview.accumulator.ToString())
 	return nil
-}
-
-// DedupeBlock takes a bitcoin block, and returns two int slices: the indexes of
-// inputs, and idexes of outputs which can be removed.  These are indexes
-// within the block as a whole, even the coinbase tx.
-// So the coinbase tx in & output numbers affect the skip lists even though
-// the coinbase ins/outs can never be deduped.  it's simpler that way.
-func DedupeBlock(blk *wire.MsgBlock) (inskip []uint32, outskip []uint32) {
-	var i uint32
-	// wire.Outpoints are comparable with == which is nice.
-	inmap := make(map[wire.OutPoint]uint32)
-
-	// go through txs then inputs building map
-	for cbif0, tx := range blk.Transactions {
-		if cbif0 == 0 { // coinbase tx can't be deduped
-			i++ // coinbase has 1 input
-			continue
-		}
-		for _, in := range tx.TxIn {
-			// fmt.Printf("%s into inmap\n", in.PreviousOutPoint.String())
-			inmap[in.PreviousOutPoint] = i
-			i++
-		}
-	}
-
-	i = 0
-	// start over, go through outputs finding skips
-	for cbif0, tx := range blk.Transactions {
-		if cbif0 == 0 { // coinbase tx can't be deduped
-			i += uint32(len(tx.TxOut)) // coinbase can have multiple inputs
-			continue
-		}
-		txid := tx.TxHash()
-
-		for outidx, _ := range tx.TxOut {
-			op := wire.OutPoint{Hash: txid, Index: uint32(outidx)}
-			// fmt.Printf("%s check for inmap... ", op.String())
-			inpos, exists := inmap[op]
-			if exists {
-				// fmt.Printf("hit")
-				inskip = append(inskip, inpos)
-				outskip = append(outskip, i)
-			}
-			// fmt.Printf("\n")
-			i++
-		}
-	}
-	// sort inskip list, as it's built in order consumed not created
-	sortUint32s(inskip)
-	return
-}
-
-// it'd be cool if you just had .sort() methods on slices of builtin types...
-func sortUint32s(s []uint32) {
-	sort.Slice(s, func(a, b int) bool { return s[a] < s[b] })
 }
 
 // BlockToAdds turns all the new utxos in a msgblock into leafTxos
 // uses remember slice up to number of txos, but doesn't check that it's the
 // right length.  Similar with skiplist, doesn't check it.
-func BlockToAddLeaves(blk wire.MsgBlock,
+func BlockToAddLeaves(blk *btcutil.Block,
 	remember []bool, skiplist []uint32,
 	height int32) (leaves []accumulator.Leaf) {
 
 	var txonum uint32
 	// bh := bl.Blockhash
-	for coinbaseif0, tx := range blk.Transactions {
+	for coinbaseif0, tx := range blk.Transactions() {
 		// cache txid aka txhash
-		txid := tx.TxHash()
-		for i, out := range tx.TxOut {
+		for i, out := range tx.MsgTx().TxOut {
 			// Skip all the OP_RETURNs
 			if util.IsUnspendable(out) {
 				txonum++
@@ -153,7 +93,7 @@ func BlockToAddLeaves(blk wire.MsgBlock,
 			var l btcacc.LeafData
 			// TODO put blockhash back in -- leaving empty for now!
 			// l.BlockHash = bh
-			l.TxHash = btcacc.Hash(txid)
+			l.TxHash = btcacc.Hash(*tx.Hash())
 			l.Index = uint32(i)
 			l.Height = height
 			if coinbaseif0 == 0 {

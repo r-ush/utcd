@@ -138,10 +138,14 @@ type BlockChain struct {
 	nextCheckpoint *chaincfg.Checkpoint
 	checkpointNode *blockNode
 
-	utreexo          bool
-	utreexoCSN       bool
-	utreexoLookAhead int
-	utreexoViewpoint *UtreexoViewpoint
+	// These fields are utreexo specific. Some fields are compact-state-node only
+	// and some are shared by both the
+	// bridgenode and the csn
+	utreexo          bool              // enable utreexo bridgenode
+	utreexoCSN       bool              // enable utreexo compact-state-node
+	ttl              bool              // enable time-to-live tracking for txos
+	utreexoLookAhead int               // set a value for the ttl
+	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
 
 	// The state is used as a fairly efficient way to cache information
 	// about the current best chain state that is returned to callers when
@@ -626,10 +630,21 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 		// Update the transaction spend journal by adding a record for
 		// the block that contains all txos spent by it.
+		//fmt.Println("stxos", stxos)
 		err = dbPutSpendJournalEntry(dbTx, block.Hash(), stxos)
 		if err != nil {
 			return err
 		}
+
+		err = dbStoreTTLForBlock(dbTx, block.Hash(), block, stxos)
+		if err != nil {
+			return err
+		}
+
+		//err = dbStoreAccProof(dbTx, block.Hash())
+		//if err != nil {
+		//	return err
+		//}
 
 		// Allow the index manager to call each of the currently active
 		// optional indexes with the block being connected so they can
@@ -682,7 +697,7 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, stxo
 
 	// Sanity check the correct number of stxos are provided.
 	if len(stxos) != countSpentOutputs(ublock.Block()) {
-		return AssertError("connectBlock called with inconsistent " +
+		return AssertError("connectUBlock called with inconsistent " +
 			"spent transaction out information")
 	}
 
@@ -928,6 +943,50 @@ func countSpentOutputs(block *btcutil.Block) int {
 		numSpent += len(tx.MsgTx().TxIn)
 	}
 	return numSpent
+}
+
+func countDedupedStxos(block *btcutil.Block) int {
+	var txInForBlock int //, txInForBlock int
+	inskip, _ := DedupeBlock(block)
+
+	// iterate through the transactions in a block
+	for txIdx, tx := range block.Transactions() {
+		// for all the txouts, get their outpoint & index and throw that into
+		// a db batch
+		//for _, txo := range tx.MsgTx().TxOut {
+		//	if len(outskip) > 0 && txOutForBlock == int(outskip[0]) {
+		//		// skip inputs in the txin skiplist
+		//		outskip = outskip[1:]
+		//		txOutForBlock++
+		//		continue
+		//	}
+		//	if util.IsUnspendable(txo) {
+		//		txOutForBlock++
+		//		continue
+		//	}
+
+		//	txOutForBlock++
+		//}
+
+		// for all the txins, throw that into the work as well; just a bunch of
+		// outpoints
+		for i := 0; i < len(tx.MsgTx().TxIn); i++ { // bit of a tounge twister
+			if txIdx == 0 {
+				txInForBlock += len(tx.MsgTx().TxIn)
+				break // skip coinbase input
+			}
+			if len(inskip) > 0 && txInForBlock == int(inskip[0]) {
+				// skip inputs in the txin skiplist
+				inskip = inskip[1:]
+				//txInForBlock++
+				continue
+			}
+
+			txInForBlock++
+		}
+	}
+
+	return txInForBlock
 }
 
 // reorganizeChain reorganizes the block chain by disconnecting the nodes in the
@@ -1230,6 +1289,7 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 		view := NewUtxoViewpoint()
 		view.SetBestHash(parentHash)
 		stxos := make([]SpentTxOut, 0, countSpentOutputs(block))
+		//sstxos := make([]SpentTxOut, 0, countDedupedStxos(block))
 		if !fastAdd {
 			err := b.checkConnectBlock(node, block, view, &stxos)
 			if err == nil {
@@ -1994,6 +2054,8 @@ type Config struct {
 	UtreexoCSN bool
 
 	UtreexoLookAhead int
+
+	TTL bool
 }
 
 // New returns a BlockChain instance using the provided configuration details.

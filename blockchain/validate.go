@@ -1095,6 +1095,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 	// still relatively cheap as compared to running the scripts) checks
 	// against all the inputs when the signature operations are out of
 	// bounds.
+	inskip, _ := DedupeBlock(block)
 	var totalFees int64
 	for _, tx := range transactions {
 		txFee, err := CheckTransactionInputs(tx, node.height, view,
@@ -1116,7 +1117,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 		// provably unspendable as available utxos.  Also, the passed
 		// spent txos slice is updated to contain an entry for each
 		// spent txout in the order each transaction spends them.
-		err = view.connectTransaction(tx, node.height, stxos)
+		err = view.connectTransaction(tx, node.height, inskip, stxos)
 		if err != nil {
 			return err
 		}
@@ -1371,6 +1372,7 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 	// still relatively cheap as compared to running the scripts) checks
 	// against all the inputs when the signature operations are out of
 	// bounds.
+	inskip, _ := DedupeBlock(ublock.Block())
 	var totalFees int64
 	for _, tx := range transactions {
 		txFee, err := CheckTransactionInputs(tx, node.height, view,
@@ -1392,7 +1394,7 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 		// provably unspendable as available utxos.  Also, the passed
 		// spent txos slice is updated to contain an entry for each
 		// spent txout in the order each transaction spends them.
-		err = view.connectTransaction(tx, node.height, stxos)
+		err = view.connectTransaction(tx, node.height, inskip, stxos)
 		if err != nil {
 			return err
 		}

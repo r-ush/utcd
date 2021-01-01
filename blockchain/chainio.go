@@ -16,6 +16,7 @@ import (
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/mit-dci/utreexo/accumulator"
 )
 
 const (
@@ -70,6 +71,10 @@ var (
 	// utreexoBucketName is the name of the db bucket used to house the
 	// utreexo compact state accumulator state
 	utreexoCSBucketName = []byte("utreexocs")
+
+	// utxoTTLBucketName is the name of the db bucket used to house the
+	// time-to-live values for each txo
+	txoTTLBucketName = []byte("txottl")
 
 	// byteOrder is the preferred byte order used for serializing numeric
 	// fields for storage in the database.
@@ -320,6 +325,12 @@ type SpentTxOut struct {
 	// Height is the height of the the block containing the creating tx.
 	Height int32
 
+	// index of "spendable and not a same block spend" stxos
+	Index int16
+
+	// time-to-live value for this particular stxo
+	TTL int32
+
 	// Denotes if the creating tx is a coinbase.
 	IsCoinBase bool
 }
@@ -372,6 +383,8 @@ func spentTxOutSerializeSize(stxo *SpentTxOut) int {
 		// so this is required for backwards compat.
 		size += serializeSizeVLQ(0)
 	}
+	size += serializeSizeVLQ(uint64(stxo.Index))
+	size += serializeSizeVLQ(uint64(stxo.TTL))
 	return size + compressedTxOutSize(uint64(stxo.Amount), stxo.PkScript)
 }
 
@@ -388,6 +401,12 @@ func putSpentTxOut(target []byte, stxo *SpentTxOut) int {
 		// so this is required for backwards compat.
 		offset += putVLQ(target[offset:], 0)
 	}
+	//if stxo.Index != 0 {
+	//	fmt.Println("PUTTING STXOINDEX:", stxo.Index)
+	//}
+	offset += putVLQ(target[offset:], uint64(stxo.Index))
+	offset += putVLQ(target[offset:], uint64(stxo.TTL))
+
 	return offset + putCompressedTxOut(target[offset:], uint64(stxo.Amount),
 		stxo.PkScript)
 }
@@ -425,6 +444,11 @@ func decodeSpentTxOut(serialized []byte, stxo *SpentTxOut) (int, error) {
 				"after reserved")
 		}
 	}
+
+	index, bytesRead := deserializeVLQ(serialized[offset:])
+	stxo.Index = int16(index) // NOTE Since the original value is uint16, this should be fine
+	stxo.TTL = int32(index)
+	offset += bytesRead
 
 	// Decode the compressed txout.
 	amount, pkScript, bytesRead, err := decodeCompressedTxOut(
@@ -713,13 +737,15 @@ func serializeUtxoEntry(entry *UtxoEntry) ([]byte, error) {
 	}
 
 	// Calculate the size needed to serialize the entry.
-	size := serializeSizeVLQ(headerCode) +
+	size := serializeSizeVLQ(uint64(entry.Index()))
+	size += serializeSizeVLQ(headerCode) +
 		compressedTxOutSize(uint64(entry.Amount()), entry.PkScript())
 
 	// Serialize the header code followed by the compressed unspent
 	// transaction output.
 	serialized := make([]byte, size)
 	offset := putVLQ(serialized, headerCode)
+	offset += putVLQ(serialized[offset:], uint64(entry.Index()))
 	offset += putCompressedTxOut(serialized[offset:], uint64(entry.Amount()),
 		entry.PkScript())
 
@@ -743,8 +769,12 @@ func deserializeUtxoEntry(serialized []byte) (*UtxoEntry, error) {
 	isCoinBase := code&0x01 != 0
 	blockHeight := int32(code >> 1)
 
+	index, bytesRead := deserializeVLQ(serialized[offset:])
+	offset += bytesRead
+
 	// Decode the compressed unspent transaction output.
 	amount, pkScript, _, err := decodeCompressedTxOut(serialized[offset:])
+
 	if err != nil {
 		return nil, errDeserialize(fmt.Sprintf("unable to decode "+
 			"utxo: %v", err))
@@ -754,6 +784,7 @@ func deserializeUtxoEntry(serialized []byte) (*UtxoEntry, error) {
 		amount:      int64(amount),
 		pkScript:    pkScript,
 		blockHeight: blockHeight,
+		index:       int16(index),
 		packedFlags: 0,
 	}
 	if isCoinBase {
@@ -1177,6 +1208,13 @@ func (b *BlockChain) createChainState() error {
 
 		}
 
+		//if b.ttl {
+		_, err = meta.CreateBucket(txoTTLBucketName)
+		if err != nil {
+			return err
+		}
+		//}
+
 		// Store the genesis block into the database.
 		return dbStoreBlock(dbTx, genesisBlock)
 	})
@@ -1303,6 +1341,9 @@ func (b *BlockChain) initChainState() error {
 				return err
 			}
 
+		}
+
+		if b.ttl {
 		}
 
 		// As a final consistency check, we'll run through all the
@@ -1445,6 +1486,17 @@ func dbStoreBlock(dbTx database.Tx, block *btcutil.Block) error {
 	return dbTx.StoreBlock(block)
 }
 
+func dbStoreAccProof(dbTx database.Tx, hash *chainhash.Hash, accProof *accumulator.BatchProof) error {
+	hasAccProof, err := dbTx.HasAccProof(hash)
+	if err != nil {
+		return err
+	}
+	if hasAccProof {
+		return nil
+	}
+	return dbTx.StoreAccProof(accProof, hash)
+}
+
 // blockIndexKey generates the binary key for an entry in the block index
 // bucket. The key is composed of the block height encoded as a big-endian
 // 32-bit unsigned int followed by the 32 byte block hash.
@@ -1497,4 +1549,136 @@ func (b *BlockChain) BlockByHash(hash *chainhash.Hash) (*btcutil.Block, error) {
 		return err
 	})
 	return block, err
+}
+
+// dbStoreTTLForBlock goes through all the stxos and stores the// spent output's ttl in the bucket
+func dbStoreTTLForBlock(dbTx database.Tx, hash *chainhash.Hash, block *btcutil.Block, stxos []SpentTxOut) error {
+	count := countDedupedStxos(block)
+	err := dbPutTTLCountForBlock(dbTx, *hash, int32(count))
+	if err != nil {
+		return err
+	}
+
+	//fmt.Printf("count:%v, len:%v\n", count, len(stxos))
+	for i := 0; i < count-1; i++ {
+		if stxos[i].TTL == 0 {
+			continue
+		}
+
+		err = dbPutTTL(dbTx, TTL{
+			height: block.Height(),
+			index:  stxos[i].Index,
+			ttl:    stxos[i].TTL,
+		})
+		//fmt.Printf("blockhash:%v sstxoindex:%v\n", hash, stxos[i].Index)
+		if err != nil {
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+// TTL is a time-to-live value for a stxo. For a given stxo, how long does it
+// take in blocks for it to be spent? Ex: A stxo created at block 5 and spent
+// at block 21 will have a ttl of 16.
+type TTL struct {
+	height int32 // height of the block that created the tx
+	//outpoint wire.OutPoint
+	index int16 // index of "spendable and not a same block spend" stxos
+	ttl   int32 // time-to-live value
+}
+
+func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
+	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
+	serializedCount := ttlBucket.Get(hash[:])
+
+	//count, _ := deserializeVLQ(serializedCount)
+	//ttls := make([]TTL, count)
+
+	count := byteOrder.Uint32(serializedCount[:])
+	ttls := make([]*TTL, count)
+
+	var key [6]byte
+	byteOrder.PutUint32(key[:4], uint32(height))
+
+	for i := uint32(0); i < count; i++ {
+		byteOrder.PutUint16(key[4:], uint16(i))
+		serialized := ttlBucket.Get(key[:])
+
+		ttl := TTL{
+			height: int32(height),
+			index:  int16(i),
+		}
+		ttl.ttl = int32(byteOrder.Uint32(serialized))
+		ttls[i] = &ttl
+	}
+
+	return ttls
+}
+
+func dbPutTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash, count int32) error {
+	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
+	//fmt.Println("ttlBucket", ttlBucket)
+
+	//size := serializeSizeVLQ(uint64(count))
+	//countBytes := make([]byte, size)
+	//putVLQ(countBytes, uint64(count))
+
+	var value [4]byte
+	byteOrder.PutUint32(value[:], uint32(count))
+
+	//fmt.Println("hash", hash)
+	//fmt.Println("value", value)
+	return ttlBucket.Put(hash[:], value[:])
+}
+
+func dbRemoveTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash) error {
+	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
+	return ttlBucket.Delete(hash[:])
+}
+
+func dbPutTTL(dbTx database.Tx, ttl TTL) error {
+	//keySize := serializeSizeVLQ(uint64(ttl.height))
+	//keySize += serializeSizeVLQ(uint64(ttl.index))
+
+	//key := make([]byte, keySize)
+
+	//offset := putVLQ(key, uint64(ttl.height))
+	//offset += putVLQ(key[offset:], uint64(ttl.index))
+
+	//valueSize := serializeSizeVLQ(uint64(ttl.ttl))
+
+	//value := make([]byte, valueSize)
+	//putVLQ(value, uint64(ttl.ttl))
+
+	var key [6]byte
+
+	byteOrder.PutUint32(key[:4], uint32(ttl.height))
+	byteOrder.PutUint16(key[4:], uint16(ttl.index))
+
+	var value [4]byte
+	byteOrder.PutUint32(value[:], uint32(ttl.ttl))
+
+	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
+	return ttlBucket.Put(key[:], value[:])
+}
+
+func dbRemoveTTL(dbTx database.Tx, height int32, index int16) error {
+	//keySize := serializeSizeVLQ(uint64(height))
+	//keySize += serializeSizeVLQ(uint64(index))
+
+	//key := make([]byte, keySize)
+
+	//offset := putVLQ(key, uint64(height))
+	//offset += putVLQ(key[offset:], uint64(index))
+
+	var serialized [6]byte
+
+	byteOrder.PutUint32(serialized[:4], uint32(height))
+	byteOrder.PutUint16(serialized[4:], uint16(index))
+
+	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
+	return ttlBucket.Delete(serialized[:])
 }

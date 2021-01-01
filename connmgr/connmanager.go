@@ -476,7 +476,6 @@ func (cm *ConnManager) Disconnect(id uint64) {
 // NOTE: This method can also be used to cancel a lingering connection attempt
 // that hasn't yet succeeded.
 func (cm *ConnManager) Remove(id uint64) {
-	fmt.Println("REMOVE")
 	if atomic.LoadInt32(&cm.stop) != 0 {
 		return
 	}

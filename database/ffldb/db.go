@@ -26,6 +26,7 @@ import (
 	"github.com/btcsuite/goleveldb/leveldb/iterator"
 	"github.com/btcsuite/goleveldb/leveldb/opt"
 	"github.com/btcsuite/goleveldb/leveldb/util"
+	"github.com/mit-dci/utreexo/accumulator"
 )
 
 const (
@@ -66,6 +67,8 @@ var (
 	// blockIdxBucketID is the ID of the internal block metadata bucket.
 	// It is the value 1 encoded as an unsigned big-endian uint32.
 	blockIdxBucketID = [4]byte{0x00, 0x00, 0x00, 0x01}
+
+	accProofIdxBucketID = [4]byte{0x00, 0x00, 0x00, 0x02}
 
 	// blockIdxBucketName is the bucket used internally to track block
 	// metadata.
@@ -949,22 +952,31 @@ type pendingBlock struct {
 	bytes []byte
 }
 
+type pendingAccProof struct {
+	hash  *chainhash.Hash
+	bytes []byte
+}
+
 // transaction represents a database transaction.  It can either be read-only or
 // read-write and implements the database.Tx interface.  The transaction
 // provides a root bucket against which all read and writes occur.
 type transaction struct {
-	managed        bool             // Is the transaction managed?
-	closed         bool             // Is the transaction closed?
-	writable       bool             // Is the transaction writable?
-	db             *db              // DB instance the tx was created from.
-	snapshot       *dbCacheSnapshot // Underlying snapshot for txns.
-	metaBucket     *bucket          // The root metadata bucket.
-	blockIdxBucket *bucket          // The block index bucket.
+	managed           bool             // Is the transaction managed?
+	closed            bool             // Is the transaction closed?
+	writable          bool             // Is the transaction writable?
+	db                *db              // DB instance the tx was created from.
+	snapshot          *dbCacheSnapshot // Underlying snapshot for txns.
+	metaBucket        *bucket          // The root metadata bucket.
+	blockIdxBucket    *bucket          // The block index bucket.
+	accProofIdxBucket *bucket          // The utreexo proof index bucket.
 
 	// Blocks that need to be stored on commit.  The pendingBlocks map is
 	// kept to allow quick lookups of pending data by block hash.
 	pendingBlocks    map[chainhash.Hash]int
 	pendingBlockData []pendingBlock
+
+	pendingAccProofs    map[chainhash.Hash]int
+	pendingAccProofData []pendingAccProof
 
 	// Keys that need to be stored or deleted on commit.
 	pendingKeys   *treap.Mutable
@@ -1583,6 +1595,129 @@ func (tx *transaction) FetchBlockRegions(regions []database.BlockRegion) ([][]by
 	return blockRegions, nil
 }
 
+// StoreAccProof stores the provided utreexo accumulator batchproof into the
+// database. There aren't any checks to make sure the proof is valid, it just
+// stores the given proof.
+func (tx *transaction) StoreAccProof(batch *accumulator.BatchProof, blockHash *chainhash.Hash) error {
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Ensure the transaction is writable.
+	if !tx.writable {
+		str := "store accproof requires a writable database transaction"
+		return makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	// Reject the block if it already exists.
+	if tx.hasAccProof(blockHash) {
+		str := fmt.Sprintf("accProof for block %s already exists", blockHash)
+		return makeDbErr(database.ErrAccProofExists, str, nil)
+	}
+
+	accBytes, err := batch.SerializeBytes()
+	if err != nil {
+		str := fmt.Sprintf("failed to get serialized bytes for accProof %s",
+			blockHash)
+		return makeDbErr(database.ErrDriverSpecific, str, err)
+	}
+
+	// Add the block to be stored to the list of pending blocks to store
+	// when the transaction is committed.  Also, add it to pending blocks
+	// map so it is easy to determine the block is pending based on the
+	// block hash.
+	if tx.pendingAccProofs == nil {
+		tx.pendingAccProofs = make(map[chainhash.Hash]int)
+	}
+	tx.pendingAccProofs[*blockHash] = len(tx.pendingAccProofData)
+	tx.pendingAccProofData = append(tx.pendingAccProofData, pendingAccProof{
+		hash:  blockHash,
+		bytes: accBytes,
+	})
+	log.Tracef("Added accproof %s to pending accproof", blockHash)
+
+	return nil
+}
+
+// HasAccProof returns whether or not a utreexo accumulator batchproof exists in the
+// database.
+func (tx *transaction) HasAccProof(hash *chainhash.Hash) (bool, error) {
+	return tx.hasAccProof(hash), nil
+}
+
+func (tx *transaction) hasAccProof(hash *chainhash.Hash) bool {
+	// Return true if the accproof is pending to be written on commit since
+	// it exists from the viewpoint of this transaction.
+	if _, exists := tx.pendingAccProofs[*hash]; exists {
+		return true
+	}
+
+	return tx.hasKey(bucketizedKey(accProofIdxBucketID, hash[:]))
+}
+
+func (tx *transaction) FetchAccProof(hash *chainhash.Hash) ([]byte, error) {
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return nil, err
+	}
+
+	// When the block is pending to be written on commit return the bytes
+	// from there.
+	if idx, exists := tx.pendingAccProofs[*hash]; exists {
+		return tx.pendingAccProofData[idx].bytes, nil
+	}
+
+	// Lookup the location of the block in the files from the block index.
+	accProofRow, err := tx.fetchAccProofRow(hash)
+	if err != nil {
+		return nil, err
+	}
+	location := deserializeBlockLoc(accProofRow)
+
+	// Read the block from the appropriate location.  The function also
+	// performs a checksum over the data to detect data corruption.
+	accProofBytes, err := tx.db.store.readAccProof(hash, location)
+	if err != nil {
+		return nil, err
+	}
+	return accProofBytes, nil
+}
+
+func (tx *transaction) FetchAccProofs(hashes []chainhash.Hash) ([][]byte, error) {
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return nil, err
+	}
+
+	// NOTE: This could check for the existence of all blocks before loading
+	// any of them which would be faster in the failure case, however
+	// callers will not typically be calling this function with invalid
+	// values, so optimize for the common case.
+
+	// Load the blocks.
+	accProofs := make([][]byte, len(hashes))
+	for i := range hashes {
+		var err error
+		accProofs[i], err = tx.FetchAccProof(&hashes[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return accProofs, nil
+}
+
+func (tx *transaction) fetchAccProofRow(hash *chainhash.Hash) ([]byte, error) {
+	accProofRow := tx.accProofIdxBucket.Get(hash[:])
+	if accProofRow == nil {
+		str := fmt.Sprintf("accproof %s does not exist", hash)
+		return nil, makeDbErr(database.ErrAccProofNotFound, str, nil)
+	}
+
+	return accProofRow, nil
+}
+
 // close marks the transaction closed then releases any pending data, the
 // underlying snapshot, the transaction read lock, and the write lock when the
 // transaction is writable.
@@ -1651,6 +1786,26 @@ func (tx *transaction) writePendingAndCommit() error {
 		// so commonly needed.
 		blockRow := serializeBlockLoc(location)
 		err = tx.blockIdxBucket.Put(blockData.hash[:], blockRow)
+		if err != nil {
+			rollback()
+			return err
+		}
+	}
+
+	for _, proofData := range tx.pendingAccProofData {
+		log.Tracef("Storing accproof %s", proofData.hash)
+		location, err := tx.db.store.writeAccProof(proofData.bytes)
+		if err != nil {
+			rollback()
+			return err
+		}
+
+		// Add a record in the index for the accproof.  The record
+		// includes the location information needed to locate the accproof
+		// on the filesystem as they are so commonly needed.
+		// uses the same location format as blocks
+		blockRow := serializeBlockLoc(location)
+		err = tx.accProofIdxBucket.Put(proofData.hash[:], blockRow)
 		if err != nil {
 			rollback()
 			return err
@@ -1797,6 +1952,8 @@ func (db *db) begin(writable bool) (*transaction, error) {
 	}
 	tx.metaBucket = &bucket{tx: tx, id: metadataBucketID}
 	tx.blockIdxBucket = &bucket{tx: tx, id: blockIdxBucketID}
+	tx.accProofIdxBucket = &bucket{tx: tx, id: accProofIdxBucketID}
+
 	return tx, nil
 }
 

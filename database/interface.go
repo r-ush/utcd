@@ -10,6 +10,7 @@ package database
 import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
+	"github.com/mit-dci/utreexo/accumulator"
 )
 
 // Cursor represents a cursor over key/value pairs and nested buckets of a
@@ -228,6 +229,14 @@ type Tx interface {
 	//
 	// Other errors are possible depending on the implementation.
 	StoreBlock(block *btcutil.Block) error
+
+	StoreAccProof(batch *accumulator.BatchProof, blockHash *chainhash.Hash) error
+
+	HasAccProof(hash *chainhash.Hash) (bool, error)
+
+	FetchAccProof(hash *chainhash.Hash) ([]byte, error)
+
+	FetchAccProofs(hashes []chainhash.Hash) ([][]byte, error)
 
 	// HasBlock returns whether or not a block with the given hash exists
 	// in the database.

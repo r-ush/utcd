@@ -566,10 +566,11 @@ func (sp *serverPeer) OnTx(_ *peer.Peer, msg *wire.MsgTx) {
 // OnBlock is invoked when a peer receives a block bitcoin message.  It
 // blocks until the bitcoin block has been fully processed.
 func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
-	fmt.Println("ONBLOCK")
 	// Convert the raw MsgBlock to a btcutil.Block which provides some
 	// convenience methods and things such as hash caching.
 	block := btcutil.NewBlockFromBlockAndBytes(msg, buf)
+
+	//fmt.Println("TXVOUT", block.Transactions()[0])
 
 	// Add the block to the known inventory for the peer.
 	iv := wire.NewInvVect(wire.InvTypeBlock, block.Hash())
@@ -2211,7 +2212,6 @@ out:
 
 		// Disconnected peers.
 		case p := <-s.donePeers:
-			fmt.Println(" IN SERVER	HERE")
 			s.handleDonePeerMsg(state, p)
 
 		// Block accepted in mainchain or orphan, update peer height.
@@ -2779,6 +2779,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		Utreexo:          cfg.Utreexo,
 		UtreexoCSN:       cfg.UtreexoCSN,
 		UtreexoLookAhead: cfg.UtreexoLookAhead,
+		TTL:              cfg.TTL,
 	})
 	if err != nil {
 		return nil, err
