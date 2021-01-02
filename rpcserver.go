@@ -161,6 +161,7 @@ var rpcHandlersBeforeInit = map[string]commandHandler{
 	"getrawmempool":          handleGetRawMempool,
 	"getrawtransaction":      handleGetRawTransaction,
 	"gettxout":               handleGetTxOut,
+	"getttl":                 handleGetTTL,
 	"help":                   handleHelp,
 	"node":                   handleNode,
 	"ping":                   handlePing,
@@ -3740,6 +3741,11 @@ func handleVersion(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (in
 		},
 	}
 	return result, nil
+}
+
+// handleGetTTL implements the getttl command.
+func handleGetTTL(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, error) {
+	return nil, nil
 }
 
 // rpcServer provides a concurrent safe RPC server to a chain server.

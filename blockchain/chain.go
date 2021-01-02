@@ -630,7 +630,6 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 		// Update the transaction spend journal by adding a record for
 		// the block that contains all txos spent by it.
-		//fmt.Println("stxos", stxos)
 		err = dbPutSpendJournalEntry(dbTx, block.Hash(), stxos)
 		if err != nil {
 			return err
@@ -640,6 +639,13 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 		if err != nil {
 			return err
 		}
+
+		//ttls := FetchTTL(dbTx, 383, block.Hash())
+		//for _, ttl := range ttls {
+		//	if ttl != nil {
+		//		fmt.Printf("TTL for height:%v, ssindex:%v, TTL:%v\n", ttl.Height, ttl.Index, ttl.TTL)
+		//	}
+		//}
 
 		//err = dbStoreAccProof(dbTx, block.Hash())
 		//if err != nil {

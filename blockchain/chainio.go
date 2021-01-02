@@ -1559,18 +1559,17 @@ func dbStoreTTLForBlock(dbTx database.Tx, hash *chainhash.Hash, block *btcutil.B
 		return err
 	}
 
-	//fmt.Printf("count:%v, len:%v\n", count, len(stxos))
 	for i := 0; i < count-1; i++ {
-		if stxos[i].TTL == 0 {
+		// If it's an OP_RETURN or a same block spend, skip
+		if stxos[i].TTL == 0 || stxos[i].Index == SSTxoIndexNA {
 			continue
 		}
 
 		err = dbPutTTL(dbTx, TTL{
-			height: block.Height(),
-			index:  stxos[i].Index,
-			ttl:    stxos[i].TTL,
+			Height: stxos[i].Height,
+			Index:  stxos[i].Index,
+			TTL:    stxos[i].TTL,
 		})
-		//fmt.Printf("blockhash:%v sstxoindex:%v\n", hash, stxos[i].Index)
 		if err != nil {
 			return err
 		}
@@ -1584,10 +1583,10 @@ func dbStoreTTLForBlock(dbTx database.Tx, hash *chainhash.Hash, block *btcutil.B
 // take in blocks for it to be spent? Ex: A stxo created at block 5 and spent
 // at block 21 will have a ttl of 16.
 type TTL struct {
-	height int32 // height of the block that created the tx
+	Height int32 // height of the block that created the tx
 	//outpoint wire.OutPoint
-	index int16 // index of "spendable and not a same block spend" stxos
-	ttl   int32 // time-to-live value
+	Index int16 // index of "spendable and not a same block spend" stxos
+	TTL   int32 // time-to-live value
 }
 
 func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
@@ -1606,17 +1605,32 @@ func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 	for i := uint32(0); i < count; i++ {
 		byteOrder.PutUint16(key[4:], uint16(i))
 		serialized := ttlBucket.Get(key[:])
+		if serialized == nil {
+			continue
+		}
 
 		ttl := TTL{
-			height: int32(height),
-			index:  int16(i),
+			Height: int32(height),
+			Index:  int16(i),
+			TTL:    int32(byteOrder.Uint32(serialized)),
 		}
-		ttl.ttl = int32(byteOrder.Uint32(serialized))
+		//ttl.ttl = int32(byteOrder.Uint32(serialized))
 		ttls[i] = &ttl
 	}
 
 	return ttls
 }
+
+//func FetchTxoTTL(dbTx database.Tx, height int32, ssindex int16) *TTL {
+//	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
+//
+//	//var key [6]byte
+//	//byteOrder.PutUint32(key[:4], uint32(height))
+//	//byteOrder.PutUint16(key[4:], uint16(ssindex)
+//
+//	//serialized := ttlBucket.Get(key[:])
+//	return nil
+//}
 
 func dbPutTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash, count int32) error {
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
@@ -1655,11 +1669,11 @@ func dbPutTTL(dbTx database.Tx, ttl TTL) error {
 
 	var key [6]byte
 
-	byteOrder.PutUint32(key[:4], uint32(ttl.height))
-	byteOrder.PutUint16(key[4:], uint16(ttl.index))
+	byteOrder.PutUint32(key[:4], uint32(ttl.Height))
+	byteOrder.PutUint16(key[4:], uint16(ttl.Index))
 
 	var value [4]byte
-	byteOrder.PutUint32(value[:], uint32(ttl.ttl))
+	byteOrder.PutUint32(value[:], uint32(ttl.TTL))
 
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	return ttlBucket.Put(key[:], value[:])
