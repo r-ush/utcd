@@ -293,8 +293,8 @@ func (view *UtxoViewpoint) connectTransaction(tx *btcutil.Tx, blockHeight int32,
 			}
 			*stxos = append(*stxos, stxo)
 			if stxo.TTL != 0 {
-				fmt.Printf("txid:%v, vout:%v, createHeight:%v, spentHeight:%v, indexWithinBlock:%v ttl:%v\n",
-					txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index, entry.BlockHeight(), blockHeight, stxo.Index, stxo.TTL)
+				//fmt.Printf("txid:%v, vout:%v, createHeight:%v, spentHeight:%v, indexWithinBlock:%v ttl:%v\n",
+				//txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index, entry.BlockHeight(), blockHeight, stxo.Index, stxo.TTL)
 
 				//fmt.Printf("txid: %v, vout: %v, ttl: %v\n", txIn.PreviousOutPoint.Hash,
 				//	txIn.PreviousOutPoint.Index, blockHeight-entry.BlockHeight())

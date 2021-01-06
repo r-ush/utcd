@@ -140,6 +140,10 @@ func (b *BlockChain) processOrphans(hash *chainhash.Hash, flags BehaviorFlags) e
 //
 // This function is safe for concurrent access.
 func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bool, bool, error) {
+	if b.utreexoQuit {
+		log.Infof("UTREEXOQUIT: Quit is received")
+		return true, false, nil
+	}
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 

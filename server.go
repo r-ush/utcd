@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -2777,6 +2778,8 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		IndexManager:     indexManager,
 		HashCache:        s.hashCache,
 		Utreexo:          cfg.Utreexo,
+		UtreexoBSPath:    filepath.Join(cfg.DataDir, "bridge_data"),
+		DataDir:          cfg.DataDir,
 		UtreexoCSN:       cfg.UtreexoCSN,
 		UtreexoLookAhead: cfg.UtreexoLookAhead,
 		TTL:              cfg.TTL,

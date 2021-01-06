@@ -34,11 +34,12 @@ import (
 )
 
 const (
-	defaultConfigFilename        = "btcd.conf"
-	defaultDataDirname           = "data"
-	defaultLogLevel              = "info"
-	defaultLogDirname            = "logs"
-	defaultLogFilename           = "btcd.log"
+	defaultConfigFilename = "btcd.conf"
+	defaultDataDirname    = "data"
+	defaultLogLevel       = "info"
+	defaultLogDirname     = "logs"
+	defaultLogFilename    = "btcd.log"
+	//defaultUtreexoBSPathName     = "bridge_data"
 	defaultMaxPeers              = 125
 	defaultBanDuration           = time.Hour * 24
 	defaultBanThreshold          = 100
@@ -161,6 +162,7 @@ type config struct {
 	SimNet               bool          `long:"simnet" description:"Use the simulation test network"`
 	TestNet3             bool          `long:"testnet" description:"Use the test network"`
 	Utreexo              bool          `long:"utreexo" description:"Serve Utreexo Proofs"`
+	UtreexoBSPath        string        `long:"utreexobspath" description:"Path for saving the Utreexo BridgeNode State"`
 	UtreexoCSN           bool          `long:"utreexocsn" description:"Enable Utreexo pruning"`
 	UtreexoLookAhead     int           `long:"utreexolookahead" description:"How many blocks ahead to cache for Utreexo"`
 	TorIsolation         bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
@@ -621,6 +623,8 @@ func loadConfig() (*config, []string, error) {
 		fmt.Println("Supported subsystems", supportedSubsystems())
 		os.Exit(0)
 	}
+
+	cfg.UtreexoBSPath = filepath.Join(cfg.DataDir, "bridge_data")
 
 	// Initialize log rotation.  After log rotation has been initialized, the
 	// logger variables may be used.

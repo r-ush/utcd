@@ -47,10 +47,14 @@ github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d h1:5TcJnD7MnA/ik
 github.com/mit-dci/utcutil v1.0.3-0.20201210084403-3868053be82d/go.mod h1:tGhBaVqjZM9RAVpiUZtdqXWh2oVQ38ZgorCZ78vpPCo=
 github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4 h1:wRhAfOSqgjeSSgTYvI/SeeQWy+/cvMFFeYw0Pkmc1cE=
 github.com/mit-dci/utcutil v1.0.3-0.20201212092129-3895935fdeb4/go.mod h1:1+8kKl7a75bLh7vMw7gsY1w2ouBpRLYY0cmCMHWebWY=
+github.com/mit-dci/utcutil v1.0.3-0.20210101083406-1c934904e5f7 h1:2uUzHsWV2OF/EbbeWdyMkkiYVdGSjtayVwLHlbFp0HE=
+github.com/mit-dci/utcutil v1.0.3-0.20210101083406-1c934904e5f7/go.mod h1:PngVd9UdctY2AY+yroWG4iC1XnGq8ysQbwV83GtTvh4=
 github.com/mit-dci/utreexo v0.0.0-20201116141530-092f6c9b8e67 h1:U5Om3SY8g7Kwd2yWZqfooGZA7dWWJrL159oxSxDuSII=
 github.com/mit-dci/utreexo v0.0.0-20201116141530-092f6c9b8e67/go.mod h1:sOjTy1VT+krgEwk71W/PztXnYkOM47r7IagMkhh/ioU=
 github.com/mit-dci/utreexo v0.0.0-20201203041934-1a03a98e9424 h1:n4T8YjFWUrVdZtRcydjPh7lY+BSdZuViIMoJQirLD4M=
 github.com/mit-dci/utreexo v0.0.0-20201203041934-1a03a98e9424/go.mod h1:Fkwf5QjCAkJxTCWWARKviyBWIX4v2NRcFsd0f0eZZjs=
+github.com/mit-dci/utreexo v0.0.0-20201228143410-ba535a0beae8 h1:dGG3mwfDVJJqVblut0GYc85HwDk6D1BbtpU7bj3TPCo=
+github.com/mit-dci/utreexo v0.0.0-20201228143410-ba535a0beae8/go.mod h1:Fkwf5QjCAkJxTCWWARKviyBWIX4v2NRcFsd0f0eZZjs=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.7.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/gomega v1.4.1/go.mod h1:C1qb7wdrVGGVU+Z6iS04AVkA3Q65CEZX59MT0QO5uiA=

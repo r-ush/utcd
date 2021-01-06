@@ -102,6 +102,20 @@ type BlockChain struct {
 	indexManager        IndexManager
 	hashCache           *txscript.HashCache
 
+	// These fields are utreexo specific. Some fields are compact-state-node only
+	// and some are shared by both the
+	// bridgenode and the csn
+	utreexo          bool                // enable utreexo bridgenode
+	UtreexoBS        *UtreexoBridgeState // state for bridgenodes
+	utreexoBSPath    string              // path for utreexo
+	utreexoQuit      bool
+	dataDir          string
+	utreexoCSN       bool // enable utreexo compact-state-node
+	ttl              bool // enable time-to-live tracking for txos
+	utreexoLookAhead int  // set a value for the ttl
+	proofFileState   *ProofFileState
+	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
+
 	// The following fields are calculated based upon the provided chain
 	// parameters.  They are also set when the instance is created and
 	// can't be changed afterwards, so there is no need to protect them with
@@ -137,15 +151,6 @@ type BlockChain struct {
 	// by the chain lock.
 	nextCheckpoint *chaincfg.Checkpoint
 	checkpointNode *blockNode
-
-	// These fields are utreexo specific. Some fields are compact-state-node only
-	// and some are shared by both the
-	// bridgenode and the csn
-	utreexo          bool              // enable utreexo bridgenode
-	utreexoCSN       bool              // enable utreexo compact-state-node
-	ttl              bool              // enable time-to-live tracking for txos
-	utreexoLookAhead int               // set a value for the ttl
-	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
 
 	// The state is used as a fairly efficient way to cache information
 	// about the current best chain state that is returned to callers when
@@ -565,7 +570,6 @@ func (b *BlockChain) getReorganizeNodes(node *blockNode) (*list.List, *list.List
 // This function MUST be called with the chain state lock held (for writes).
 func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 	view *UtxoViewpoint, stxos []SpentTxOut) error {
-
 	// Make sure it's extending the end of the best chain.
 	prevHash := &block.MsgBlock().Header.PrevBlock
 	if !prevHash.IsEqual(&b.bestChain.Tip().hash) {
@@ -640,16 +644,21 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 			return err
 		}
 
+		ud, err := b.UpdateUtreexoBS(block, stxos)
+		if err != nil {
+			return err
+		}
+
+		err = b.proofFileState.flatFileStoreAccProof(ud)
+		if err != nil {
+			return err
+		}
+
 		//ttls := FetchTTL(dbTx, 383, block.Hash())
 		//for _, ttl := range ttls {
 		//	if ttl != nil {
 		//		fmt.Printf("TTL for height:%v, ssindex:%v, TTL:%v\n", ttl.Height, ttl.Index, ttl.TTL)
 		//	}
-		//}
-
-		//err = dbStoreAccProof(dbTx, block.Hash())
-		//if err != nil {
-		//	return err
 		//}
 
 		// Allow the index manager to call each of the currently active
@@ -2057,9 +2066,13 @@ type Config struct {
 
 	Utreexo bool
 
+	UtreexoBSPath string
+
 	UtreexoCSN bool
 
 	UtreexoLookAhead int
+
+	DataDir string
 
 	TTL bool
 }
@@ -2118,14 +2131,15 @@ func New(config *Config) (*BlockChain, error) {
 		warningCaches:       newThresholdCaches(vbNumBits),
 		deploymentCaches:    newThresholdCaches(chaincfg.DefinedDeployments),
 		utreexo:             config.Utreexo,
+		utreexoBSPath:       config.UtreexoBSPath,
 		utreexoCSN:          config.UtreexoCSN,
 		utreexoLookAhead:    config.UtreexoLookAhead,
+		dataDir:             config.DataDir,
 	}
 
 	if config.UtreexoCSN {
 		b.utreexoLookAhead = config.UtreexoLookAhead
 		b.utreexoCSN = config.UtreexoCSN
-		//b.utreexoViewpoint = NewUtreexoViewpoint()
 	}
 
 	// Initialize the chain state from the passed database.  When the db
