@@ -169,15 +169,17 @@ func btcdMain(serverChan chan<- *server) error {
 	// server.
 	<-interrupt
 
-	err = server.chain.FlushProofFileState()
-	if err != nil {
-		return err
-	}
+	//err = server.chain.FlushProofFileState()
+	//if err != nil {
+	//	return err
+	//}
 
-	// TODO add saving the utreexo proofs and forest here
-	err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
-	if err != nil {
-		return err
+	if cfg.Utreexo {
+		// TODO add saving the utreexo proofs and forest here
+		err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

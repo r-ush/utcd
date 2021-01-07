@@ -39,6 +39,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/btcutil/bloom"
+	"github.com/mit-dci/utreexo/btcacc"
 )
 
 const (
@@ -1622,6 +1623,69 @@ func (s *server) pushMerkleBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 
 func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	doneChan chan<- struct{}, waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
+	block, err := s.chain.BlockByHash(hash)
+	if err != nil {
+		return err
+	}
+
+	var ttls []int32
+	err = sp.server.db.View(func(dbTx database.Tx) error {
+		ttls = blockchain.FetchOnlyTTL(dbTx, block.Height(), hash)
+		return nil
+	})
+	//if err != nil {
+	//	peerLog.Tracef("Unable to fetch ttl for the requested block %v: %v",
+	//		hash, err)
+
+	//	if doneChan != nil {
+	//		doneChan <- struct{}{}
+	//	}
+	//	return err
+	//}
+
+	udBytes, err := s.chain.FetchProof(block.Height())
+	if err != nil {
+		return err
+	}
+	udReader := bytes.NewReader(udBytes)
+
+	ud := btcacc.UData{}
+	ud.Deserialize(udReader)
+	ud.TxoTTLs = ttls
+
+	ublock := wire.MsgUBlock{
+		MsgBlock:    *block.MsgBlock(),
+		UtreexoData: ud,
+	}
+
+	// Once we have fetched data wait for any previous operation to finish.
+	if waitChan != nil {
+		<-waitChan
+	}
+
+	// We only send the channel for this message if we aren't sending
+	// an inv straight after.
+	var dc chan<- struct{}
+	continueHash := sp.continueHash
+	sendInv := continueHash != nil && continueHash.IsEqual(hash)
+	if !sendInv {
+		dc = doneChan
+	}
+	sp.QueueMessageWithEncoding(&ublock, dc, encoding)
+
+	// When the peer requests the final block that was advertised in
+	// response to a getblocks message which requested more blocks than
+	// would fit into a single message, send it a new inventory message
+	// to trigger it to issue another getblocks message for the next
+	// batch of inventory.
+	if sendInv {
+		best := s.chain.BestSnapshot()
+		invMsg := wire.NewMsgInvSizeHint(1)
+		iv := wire.NewInvVect(wire.InvTypeUBlock, &best.Hash)
+		invMsg.AddInvVect(iv)
+		sp.QueueMessage(invMsg, doneChan)
+		sp.continueHash = nil
+	}
 
 	return nil
 }

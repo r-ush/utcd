@@ -639,19 +639,21 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 			return err
 		}
 
-		err = dbStoreTTLForBlock(dbTx, block.Hash(), block, stxos)
-		if err != nil {
-			return err
-		}
+		if b.utreexo {
+			err = dbStoreTTLForBlock(dbTx, block.Hash(), block, stxos)
+			if err != nil {
+				return err
+			}
 
-		ud, err := b.UpdateUtreexoBS(block, stxos)
-		if err != nil {
-			return err
-		}
+			ud, err := b.UpdateUtreexoBS(block, stxos)
+			if err != nil {
+				return err
+			}
 
-		err = b.proofFileState.flatFileStoreAccProof(ud)
-		if err != nil {
-			return err
+			err = b.proofFileState.flatFileStoreAccProof(*ud)
+			if err != nil {
+				return err
+			}
 		}
 
 		//ttls := FetchTTL(dbTx, 383, block.Hash())

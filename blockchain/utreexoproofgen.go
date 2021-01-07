@@ -105,6 +105,13 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	if err != nil {
 		return nil, err
 	}
+	ud.TxoTTLs = make([]int32, len(adds))
+	//	fmt.Println("ud height:", ud.Height)
+	//	fmt.Println("ud ttl len:", len(ud.TxoTTLs))
+	//	fmt.Println("ud stxos len:", len(ud.Stxos))
+	//	fmt.Println("ud accProof len:", len(ud.AccProof.Proof))
+	//if len(ud.Stxos) != 0 {
+	//}
 
 	// TODO don't ignore undoblock
 	_, err = b.UtreexoBS.forest.Modify(adds, ud.AccProof.Targets)
