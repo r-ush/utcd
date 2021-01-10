@@ -851,6 +851,10 @@ func getWitnessSigOps(pkScript []byte, witness wire.TxWitness) int {
 // guaranteed to fail at execution.  This allows inputs to be pruned instantly
 // when entering the UTXO set.
 func IsUnspendable(pkScript []byte) bool {
+	if len(pkScript) > MaxScriptSize {
+		return true
+	}
+
 	pops, err := parseScript(pkScript)
 	if err != nil {
 		return true

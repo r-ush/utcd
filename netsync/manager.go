@@ -429,9 +429,18 @@ func (sm *SyncManager) isSyncCandidate(peer *peerpkg.Peer) bool {
 				"soft-fork state: %v", err)
 		}
 		nodeServices := peer.Services()
-		if nodeServices&wire.SFNodeNetwork != wire.SFNodeNetwork ||
-			(segwitActive && !peer.IsWitnessEnabled()) {
-			return false
+		if sm.utreexoCSN {
+			if //nodeServices&wire.SFNodeNetwork != wire.SFNodeNetwork ||
+			//(segwitActive && !peer.IsWitnessEnabled()) ||
+			nodeServices&wire.SFNodeUtreexo != wire.SFNodeUtreexo {
+				log.Debugf("Peer is not a Utreexo node. Not a sync candidate")
+				return false
+			}
+		} else {
+			if nodeServices&wire.SFNodeNetwork != wire.SFNodeNetwork ||
+				(segwitActive && !peer.IsWitnessEnabled()) {
+				return false
+			}
 		}
 	}
 

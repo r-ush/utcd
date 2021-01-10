@@ -3758,6 +3758,7 @@ type rpcServer struct {
 	helpCacher             *helpCacher
 	requestProcessShutdown chan struct{}
 	quit                   chan int
+	utreexoCSN             bool
 }
 
 // httpStatusLine returns a response Status-Line (RFC 2616 Section 6.1)
@@ -4460,6 +4461,17 @@ func (s *rpcServer) handleBlockchainNotification(notification *blockchain.Notifi
 		s.gbtWorkState.NotifyBlockConnected(block.Hash())
 
 	case blockchain.NTBlockConnected:
+		var ok bool
+		var block *btcutil.Block
+
+		if s.utreexoCSN {
+			var ublock *btcutil.UBlock
+			ublock, ok = notification.Data.(*btcutil.UBlock)
+			block = ublock.Block()
+		} else {
+			block, ok = notification.Data.(*btcutil.Block)
+		}
+
 		block, ok := notification.Data.(*btcutil.Block)
 		if !ok {
 			rpcsLog.Warnf("Chain connected notification is not a block.")

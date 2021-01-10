@@ -438,9 +438,9 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 	// Reject outbound peers that are not full nodes.
 	wantServices := wire.SFNodeNetwork
 
-	if sp.server.services&wire.SFNodeUtreexo == wire.SFNodeUtreexo {
-		wantServices &^= wire.SFNodeUtreexo
-	}
+	//if sp.server.services&wire.SFNodeUtreexo == wire.SFNodeUtreexo {
+	//	wantServices &^= wire.SFNodeUtreexo
+	//}
 	if !isInbound && !hasServices(msg.Services, wantServices) {
 		missingServices := wantServices & ^msg.Services
 		srvrLog.Debugf("Rejecting peer %s with services %v due to not "+
@@ -2737,8 +2737,9 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.NoCFilters {
 		services &^= wire.SFNodeCF
 	}
-	if cfg.UtreexoCSN {
-		services = wire.SFNodeUtreexo
+	if cfg.Utreexo {
+		fmt.Println("set utreexo service")
+		services |= wire.SFNodeUtreexo
 	}
 
 	amgr := addrmgr.New(cfg.DataDir, btcdLookup)

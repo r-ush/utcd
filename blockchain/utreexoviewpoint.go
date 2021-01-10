@@ -5,8 +5,6 @@
 package blockchain
 
 import (
-	"fmt"
-
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
@@ -34,9 +32,22 @@ func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
 
 // Modify takes an ublock and adds the utxos and deletes the stxos from the utreexo state
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
-	err := uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
+	inskip, outskip := DedupeBlock(ub.Block())
+
+	nl, h := uview.accumulator.ReconstructStats()
+
+	err := ub.ProofSanity(inskip, nl, h)
 	if err != nil {
-		return err
+		panic(err)
+		//return err
+		//return fmt.Errorf(
+		//	"uData missing utxo data for block %d err: %e", ub.Block().Height(), err)
+	}
+
+	err = uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
+	if err != nil {
+		panic(err)
+		//return err
 	}
 
 	remember := make([]bool, len(ub.MsgUBlock().UtreexoData.TxoTTLs))
@@ -44,21 +55,12 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 		remember[i] = ttl < uview.accumulator.Lookahead
 	}
 
-	inskip, outskip := DedupeBlock(ub.Block())
-
-	nl, h := uview.accumulator.ReconstructStats()
-
-	err = ub.ProofSanity(inskip, nl, h)
-	if err != nil {
-		return fmt.Errorf(
-			"uData missing utxo data for block %d err: %e", ub.MsgUBlock().UtreexoData.Height, err)
-	}
-
 	leaves := BlockToAddLeaves(ub.Block(), remember, outskip, ub.MsgUBlock().UtreexoData.Height)
 
 	err = uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
 	if err != nil {
-		return err
+		panic(err)
+		//return err
 	}
 
 	uview.bestHash = *ub.Hash()

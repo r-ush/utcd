@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
 	"github.com/mit-dci/utreexo/btcacc"
@@ -94,6 +95,10 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 		return nil, nil
 	}
 	inskip, outskip := DedupeBlock(block)
+	if block.Height() == 54503 {
+		fmt.Println("outskip", outskip)
+		fmt.Println("inskip", inskip)
+	}
 	dels, err := blockToDelLeaves(stxos, block, inskip)
 	if err != nil {
 		return nil, err
@@ -104,6 +109,12 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	ud, err := btcacc.GenUData(dels, b.UtreexoBS.forest, block.Height())
 	if err != nil {
 		return nil, err
+	}
+	if block.Height() == 54503 {
+		if len(adds) != 1 {
+			s := fmt.Errorf("block 54503 len adds is not 1 but %v. Hash is %v", len(adds), block.Hash())
+			panic(s)
+		}
 	}
 	ud.TxoTTLs = make([]int32, len(adds))
 	//	fmt.Println("ud height:", ud.Height)
@@ -174,6 +185,11 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 				txonum++
 				continue
 			}
+			//if block.Height() == 54503 {
+			//	fmt.Println("unspendable?", txscript.IsUnspendable(txOut.PkScript))
+			//	fmt.Println("utreexo func?:", isUnspendable(txOut))
+			//	fmt.Printf("script: %x\n", txOut.PkScript)
+			//}
 			// Skip txos on the skip list
 			if len(outskip) > 0 && outskip[0] == txonum {
 				outskip = outskip[1:]
@@ -205,4 +221,19 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 	}
 
 	return
+}
+
+//IsUnspendable determines whether a tx is spendable or not.
+//returns true if spendable, false if unspendable.
+func isUnspendable(o *wire.TxOut) bool {
+	switch {
+	case len(o.PkScript) > 10000: //len 0 is OK, spendable
+		fmt.Println("Unspendable reason: PkScript longer than 10,000")
+		return true
+	case len(o.PkScript) > 0 && o.PkScript[0] == 0x6a: // OP_RETURN is 0x6a
+		fmt.Println("Unspendable reason: PkScript 0x6a")
+		return true
+	default:
+		return false
+	}
 }

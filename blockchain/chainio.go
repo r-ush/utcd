@@ -1595,6 +1595,10 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 		file:    offsetFile,
 		rwMutex: &sync.RWMutex{},
 	}
+	_, err = pf.offsetState.file.Write(make([]byte, 8))
+	if err != nil {
+		panic(err)
+	}
 
 	return nil
 }
@@ -1715,7 +1719,7 @@ func (b *BlockChain) FetchProof(height int32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("magic:%v\n", magic)
+	//fmt.Printf("magic:%v\n", magic)
 
 	if !bytes.Equal(magic, []byte{0xaa, 0xff, 0xaa, 0xff}) {
 		return nil, fmt.Errorf("wrong magic")
@@ -1728,7 +1732,7 @@ func (b *BlockChain) FetchProof(height int32) ([]byte, error) {
 	if size > 1<<24 {
 		return nil, fmt.Errorf("size at offest %d says %d which is too big", offset, size)
 	}
-	fmt.Printf("size:%v\n", size)
+	//fmt.Printf("size:%v\n", size)
 
 	udBytes := make([]byte, size)
 	_, err = b.proofFileState.proofState.file.Read(udBytes)
