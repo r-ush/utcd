@@ -9,7 +9,6 @@ import (
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
 	"github.com/mit-dci/utreexo/btcacc"
-	"github.com/mit-dci/utreexo/util"
 )
 
 type UtreexoViewpoint struct {
@@ -81,7 +80,7 @@ func BlockToAddLeaves(blk *btcutil.Block,
 		// cache txid aka txhash
 		for i, out := range tx.MsgTx().TxOut {
 			// Skip all the OP_RETURNs
-			if util.IsUnspendable(out) {
+			if isUnspendable(out) {
 				txonum++
 				continue
 			}

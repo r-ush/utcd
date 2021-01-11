@@ -113,6 +113,7 @@ type BlockChain struct {
 	utreexoCSN       bool // enable utreexo compact-state-node
 	ttl              bool // enable time-to-live tracking for txos
 	utreexoLookAhead int  // set a value for the ttl
+	memBlocks        *memBlockStore
 	proofFileState   *ProofFileState
 	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
 
@@ -650,6 +651,14 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 				return err
 			}
 
+			//if block.Height() == 119058 {
+			//	fmt.Println("height:", ud.Height)
+			//	fmt.Println("AccProof targets:", len(ud.AccProof.Targets))
+			//	fmt.Println("AccProof hashes:", len(ud.AccProof.Proof))
+			//	fmt.Println("Stxos:", len(ud.Stxos))
+			//	fmt.Println("TxoTTLs:", len(ud.TxoTTLs))
+			//	panic("just quit")
+			//}
 			err = b.proofFileState.flatFileStoreAccProof(*ud)
 			if err != nil {
 				return err
@@ -795,6 +804,8 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, stxo
 		if err != nil {
 			return err
 		}
+
+		b.memBlocks.StoreBlock(ublock.Block())
 
 		// Allow the index manager to call each of the currently active
 		// optional indexes with the block being connected so they can
@@ -977,7 +988,7 @@ func countDedupedStxos(block *btcutil.Block) int {
 		//		txOutForBlock++
 		//		continue
 		//	}
-		//	if util.IsUnspendable(txo) {
+		//	if isUnspendable(txo) {
 		//		txOutForBlock++
 		//		continue
 		//	}

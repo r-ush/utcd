@@ -1103,6 +1103,64 @@ func dbPutBestState(dbTx database.Tx, snapshot *BestState, workSum *big.Int) err
 	return dbTx.Metadata().Put(chainStateKeyName, serializedData)
 }
 
+func serializeBestState(snapshot *BestState) ([]byte, error) {
+	timeBytes, err := snapshot.MedianTime.GobEncode()
+	if err != nil {
+		return nil, err
+	}
+
+	// sha256 hash, int32, uint32, then all uint64
+	size := chainhash.HashSize + 4 + 4 + 8 + 8 + 8 + 8 + len(timeBytes)
+
+	serialized := make([]byte, size)
+
+	copy(serialized[0:chainhash.HashSize], snapshot.Hash[:])
+	offset := uint32(chainhash.HashSize)
+	byteOrder.PutUint32(serialized[offset:], uint32(snapshot.Height))
+	offset += 4
+	byteOrder.PutUint32(serialized[offset:], snapshot.Bits)
+	offset += 4
+	byteOrder.PutUint64(serialized[offset:], snapshot.BlockSize)
+	offset += 8
+	byteOrder.PutUint64(serialized[offset:], snapshot.BlockWeight)
+	offset += 8
+	byteOrder.PutUint64(serialized[offset:], snapshot.NumTxns)
+	offset += 8
+	byteOrder.PutUint64(serialized[offset:], snapshot.TotalTxns)
+	offset += 8
+	copy(serialized[offset:], timeBytes[:])
+
+	return serialized, nil
+}
+
+//func deserializeBestState(serializedData []byte) (*BestState, error) {
+//	// Ensure the serialized data has enough bytes to properly deserialize
+//	// the hash, height, total transactions, and work sum length.
+//	if len(serializedData) < chainhash.HashSize+16 {
+//		return bestChainState{}, database.Error{
+//			ErrorCode:   database.ErrCorruption,
+//			Description: "corrupt best state",
+//		}
+//	}
+//	return nil, nil
+//}
+
+func dbPutActualBestState(dbTx, snapshot *BestState) error {
+	return nil
+}
+
+//func dbGetActualBestState(dbTx database.Tx) (*BestState, error) {
+//	serialized := dbTx.Metadata().Get(chainStateKeyName)
+//	bestChainState, err := deserializeBestChainState(serialized)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	bestState := BestState{}
+//
+//	return bestState, nil
+//}
+
 // createChainState initializes both the database and the chain state to the
 // genesis block.  This includes creating the necessary buckets and inserting
 // the genesis block, so it must only be called on an uninitialized database.
@@ -1207,7 +1265,9 @@ func (b *BlockChain) createChainState() error {
 			if err != nil {
 				return err
 			}
-
+			if b.utreexoCSN {
+				b.memBlocks = &memBlockStore{}
+			}
 		}
 
 		if b.utreexo {
@@ -1233,6 +1293,7 @@ func (b *BlockChain) createChainState() error {
 // database.  When the db does not yet contain any chain state, both it and the
 // chain state are initialized to the genesis block.
 func (b *BlockChain) initChainState() error {
+	fmt.Println("INITCHAIN")
 	// Determine the state of the chain database. We may need to initialize
 	// everything from scratch or upgrade certain buckets.
 	var initialized, hasBlockIndex bool
@@ -1386,6 +1447,13 @@ func (b *BlockChain) initChainState() error {
 		b.stateSnapshot = newBestState(tip, blockSize, blockWeight,
 			numTxns, state.totalTxns, tip.CalcPastMedianTime())
 
+		if b.utreexoCSN {
+			newBlock := btcutil.NewBlock(&block)
+			newBlock.SetHeight(tip.height)
+			b.memBlocks = &memBlockStore{
+				blocks: newBlock,
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -1499,6 +1567,63 @@ func dbStoreBlock(dbTx database.Tx, block *btcutil.Block) error {
 	}
 	return dbTx.StoreBlock(block)
 }
+
+type memBlockStore struct {
+	blocks *btcutil.Block
+}
+
+// StoreBlock keeps 12 blocks in memory in a fifo structure
+func (mbs *memBlockStore) StoreBlock(block *btcutil.Block) {
+	mbs.blocks = block
+	//mbs.blocks = append(mbs.blocks, block)
+
+	//// 12 is the max blocks to keep on memory
+	//if len(mbs.blocks) > 12 {
+	//	mbs.blocks = mbs.blocks[1:]
+	//}
+}
+
+// FetchBlock returns the block thats stored in memory. Returns nil if the block
+// isn't there
+func (mbs *memBlockStore) FetchBlock(hash *chainhash.Hash) *btcutil.Block {
+	if mbs.blocks.Hash() == hash {
+		return mbs.blocks
+	}
+	//for i := 0; i < len(mbs.blocks); i++ {
+	//	if mbs.blocks[i].Hash() == hash {
+	//		return mbs.blocks[i]
+	//	}
+	//}
+
+	return nil
+}
+
+func (b *BlockChain) FlushMemBlockStore() error {
+	b.chainLock.Lock()
+	defer b.chainLock.Unlock()
+
+	b.utreexoQuit = true
+
+	err := b.db.Update(func(dbTx database.Tx) error {
+		fmt.Println("STORE BLOCK", b.memBlocks.blocks.Hash())
+		return dbTx.StoreBlock(b.memBlocks.blocks)
+		//for i := 0; i < len(b.memBlocks.blocks); i++ {
+		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
+		//	if err != nil {
+		//		return err
+		//	}
+		//}
+		//return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+//func (b *BlockChain) RestoreMemBlockStore() {
+//}
 
 //func dbStoreAccProof(dbTx database.Tx, hash *chainhash.Hash, accProof *accumulator.BatchProof) error {
 //	hasAccProof, err := dbTx.HasAccProof(hash)
@@ -1691,7 +1816,7 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 	return nil
 }
 
-func (b *BlockChain) FetchProof(height int32) ([]byte, error) {
+func (b *BlockChain) FetchProof(height int32) (*btcacc.UData, error) {
 	b.proofFileState.offsetState.rwMutex.RLock()
 	b.proofFileState.proofState.rwMutex.RLock()
 	defer b.proofFileState.offsetState.rwMutex.RUnlock()
@@ -1740,7 +1865,12 @@ func (b *BlockChain) FetchProof(height int32) ([]byte, error) {
 		return nil, err
 	}
 
-	return udBytes, nil
+	udReader := bytes.NewReader(udBytes)
+
+	ud := btcacc.UData{}
+	ud.Deserialize(udReader)
+
+	return &ud, nil
 }
 
 // blockIndexKey generates the binary key for an entry in the block index

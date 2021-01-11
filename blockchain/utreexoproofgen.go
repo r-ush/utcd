@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
@@ -95,7 +94,7 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 		return nil, nil
 	}
 	inskip, outskip := DedupeBlock(block)
-	if block.Height() == 54503 {
+	if block.Height() == 119058 {
 		fmt.Println("outskip", outskip)
 		fmt.Println("inskip", inskip)
 	}
@@ -110,12 +109,12 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	if err != nil {
 		return nil, err
 	}
-	if block.Height() == 54503 {
-		if len(adds) != 1 {
-			s := fmt.Errorf("block 54503 len adds is not 1 but %v. Hash is %v", len(adds), block.Hash())
-			panic(s)
-		}
-	}
+	//if block.Height() == 54503 {
+	//	if len(adds) != 1 {
+	//		s := fmt.Errorf("block 54503 len adds is not 1 but %v. Hash is %v", len(adds), block.Hash())
+	//		panic(s)
+	//	}
+	//}
 	ud.TxoTTLs = make([]int32, len(adds))
 	//	fmt.Println("ud height:", ud.Height)
 	//	fmt.Println("ud ttl len:", len(ud.TxoTTLs))
@@ -134,6 +133,7 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 }
 
 func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32) (delLeaves []btcacc.LeafData, err error) {
+	var blockInputs int
 	var blockInIdx uint32
 	for idx, tx := range block.Transactions() {
 		if idx == 0 {
@@ -143,6 +143,7 @@ func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32)
 		idx--
 
 		for _, txIn := range tx.MsgTx().TxIn {
+			blockInputs++
 			// Skip txos on the skip list
 			if len(inskip) > 0 && inskip[0] == blockInIdx {
 				inskip = inskip[1:]
@@ -170,6 +171,12 @@ func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32)
 		}
 	}
 
+	if blockInputs != len(stxos) {
+		return nil, fmt.Errorf(
+			"block height: %v, hash:%x, has %v txs but %v stxos",
+			block.Height(), block.Hash(), len(block.Transactions()), len(stxos))
+	}
+
 	return
 }
 
@@ -181,7 +188,10 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 	for coinbase, tx := range block.Transactions() {
 		for outIdx, txOut := range tx.MsgTx().TxOut {
 			// Skip all the OP_RETURNs
-			if txscript.IsUnspendable(txOut.PkScript) {
+			if isUnspendable(txOut) {
+				if block.Height() == 119058 {
+					fmt.Println("OP RETURN!", txonum)
+				}
 				txonum++
 				continue
 			}
@@ -192,6 +202,9 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 			//}
 			// Skip txos on the skip list
 			if len(outskip) > 0 && outskip[0] == txonum {
+				if block.Height() == 119058 {
+					fmt.Println("OUTSKIP!", txonum)
+				}
 				outskip = outskip[1:]
 				txonum++
 				continue
@@ -223,15 +236,15 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 	return
 }
 
-//IsUnspendable determines whether a tx is spendable or not.
+//isUnspendable determines whether a tx is spendable or not.
 //returns true if spendable, false if unspendable.
 func isUnspendable(o *wire.TxOut) bool {
 	switch {
 	case len(o.PkScript) > 10000: //len 0 is OK, spendable
-		fmt.Println("Unspendable reason: PkScript longer than 10,000")
+		//fmt.Println("Unspendable reason: PkScript longer than 10,000")
 		return true
 	case len(o.PkScript) > 0 && o.PkScript[0] == 0x6a: // OP_RETURN is 0x6a
-		fmt.Println("Unspendable reason: PkScript 0x6a")
+		//fmt.Println("Unspendable reason: PkScript 0x6a")
 		return true
 	default:
 		return false

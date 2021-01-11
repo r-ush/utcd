@@ -39,7 +39,6 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/btcutil/bloom"
-	"github.com/mit-dci/utreexo/btcacc"
 )
 
 const (
@@ -1643,19 +1642,15 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	//	return err
 	//}
 
-	udBytes, err := s.chain.FetchProof(block.Height())
+	ud, err := s.chain.FetchProof(block.Height())
 	if err != nil {
 		return err
 	}
-	udReader := bytes.NewReader(udBytes)
-
-	ud := btcacc.UData{}
-	ud.Deserialize(udReader)
 	ud.TxoTTLs = ttls
 
 	ublock := wire.MsgUBlock{
 		MsgBlock:    *block.MsgBlock(),
-		UtreexoData: ud,
+		UtreexoData: *ud,
 	}
 
 	// Once we have fetched data wait for any previous operation to finish.

@@ -34,7 +34,7 @@ func GenTTL(block btcutil.Block, view *UtxoViewpoint, inskip, outskip []uint32) 
 	//			txoInBlock++
 	//			continue
 	//		}
-	//		if util.IsUnspendable(txo) {
+	//		if isUnspendable(txo) {
 	//			txoInBlock++
 	//			continue
 	//		}

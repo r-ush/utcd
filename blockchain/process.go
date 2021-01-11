@@ -248,6 +248,10 @@ func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bo
 }
 
 func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, bool, error) {
+	if b.utreexoQuit {
+		log.Infof("UTREEXOQUIT: Quit is received")
+		return true, false, nil
+	}
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 

@@ -182,6 +182,13 @@ func btcdMain(serverChan chan<- *server) error {
 		}
 	}
 
+	if cfg.UtreexoCSN {
+		err = server.chain.FlushMemBlockStore()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
