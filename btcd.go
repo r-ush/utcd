@@ -187,6 +187,11 @@ func btcdMain(serverChan chan<- *server) error {
 		if err != nil {
 			return err
 		}
+
+		err = server.chain.PutUtreexoView()
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

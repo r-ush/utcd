@@ -5,6 +5,8 @@
 package blockchain
 
 import (
+	"fmt"
+
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
@@ -31,7 +33,7 @@ func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
 
 // Modify takes an ublock and adds the utxos and deletes the stxos from the utreexo state
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
-	inskip, outskip := DedupeBlock(ub.Block())
+	inskip, outskip := ub.Block().DedupeBlock()
 
 	nl, h := uview.accumulator.ReconstructStats()
 
@@ -62,7 +64,7 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 		//return err
 	}
 
-	uview.bestHash = *ub.Hash()
+	uview.bestHash = *ub.Block().Hash()
 
 	return nil
 }
@@ -111,6 +113,56 @@ func BlockToAddLeaves(blk *btcutil.Block,
 		}
 	}
 	return
+}
+
+func UBlockToStxos(ublock *btcutil.UBlock, stxos *[]SpentTxOut) error {
+	for _, ustxo := range ublock.MsgUBlock().UtreexoData.Stxos {
+		stxo := SpentTxOut{
+			Amount:     ustxo.Amt,
+			PkScript:   ustxo.PkScript,
+			Height:     ustxo.Height,
+			IsCoinBase: ustxo.Coinbase,
+		}
+		*stxos = append(*stxos, stxo)
+	}
+
+	_, outskip := ublock.Block().DedupeBlock()
+
+	shouldadd := len(outskip)
+
+	var txonum uint32
+	var added int
+	for coinbaseif0, tx := range ublock.Block().MsgBlock().Transactions {
+		for _, txOut := range tx.TxOut {
+			// Skip all the OP_RETURNs
+			if isUnspendable(txOut) {
+				txonum++
+				continue
+			}
+			// Skip txos on the skip list
+			if len(outskip) > 0 && outskip[0] == txonum {
+				//fmt.Println("ADD:", txonum)
+				stxo := SpentTxOut{
+					Amount:     txOut.Value,
+					PkScript:   txOut.PkScript,
+					Height:     ublock.Block().Height(),
+					IsCoinBase: coinbaseif0 == 0,
+				}
+				*stxos = append(*stxos, stxo)
+				outskip = outskip[1:]
+				txonum++
+				added++
+				continue
+			}
+			txonum++
+		}
+	}
+	if added != shouldadd {
+		s := fmt.Errorf("should add %v but only added %v. txonum final:%v", shouldadd, added, txonum)
+		//fmt.Println(s)
+		panic(s)
+	}
+	return nil
 }
 
 func NewUtreexoViewpoint() *UtreexoViewpoint {

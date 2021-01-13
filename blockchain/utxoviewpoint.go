@@ -320,7 +320,7 @@ func (view *UtxoViewpoint) connectTransaction(tx *btcutil.Tx, blockHeight int32,
 // In addition, when the 'stxos' argument is not nil, it will be updated to
 // append an entry for each spent txout.
 func (view *UtxoViewpoint) connectTransactions(block *btcutil.Block, stxos *[]SpentTxOut) error {
-	inskip, _ := DedupeBlock(block)
+	inskip, _ := block.DedupeBlock()
 	for _, tx := range block.Transactions() {
 		err := view.connectTransaction(tx, block.Height(), inskip, stxos)
 		if err != nil {
@@ -647,6 +647,42 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 			Index: ld.Index,
 		}
 		m[op] = utxo
+	}
+
+	_, outskip := ub.Block().DedupeBlock()
+	//fmt.Println("OUTSKIP:", outskip)
+
+	shouldadd := len(outskip)
+
+	var txonum uint32
+	var added int
+	for coinbaseif0, tx := range ub.Block().MsgBlock().Transactions {
+		for idx, txOut := range tx.TxOut {
+			// Skip all the OP_RETURNs
+			if isUnspendable(txOut) {
+				txonum++
+				continue
+			}
+			// Skip txos on the skip list
+			if len(outskip) > 0 && outskip[0] == txonum {
+				utxo := NewUtxoEntry(
+					txOut, ub.Block().Height(), coinbaseif0 == 0)
+				op := wire.OutPoint{
+					Index: uint32(idx),
+					Hash:  tx.TxHash(),
+				}
+				m[op] = utxo
+				outskip = outskip[1:]
+				txonum++
+				added++
+				continue
+			}
+			txonum++
+		}
+	}
+	if added != shouldadd {
+		s := fmt.Errorf("should add %v but only added %v. txonum final:%v", shouldadd, added, txonum)
+		panic(s)
 	}
 
 	return nil

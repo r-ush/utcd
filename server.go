@@ -63,7 +63,7 @@ const (
 var (
 	// userAgentName is the user agent name and is used to help identify
 	// ourselves to other bitcoin peers.
-	userAgentName = "btcd"
+	userAgentName = "btcd/utreexo"
 
 	// userAgentVersion is the user agent version and is used to help
 	// identify ourselves to other bitcoin peers.
@@ -2736,6 +2736,9 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		fmt.Println("set utreexo service")
 		services |= wire.SFNodeUtreexo
 	}
+	//if cfg.UtreexoCSN {
+	//	services &^= wire.SFNodeNetwork
+	//}
 
 	amgr := addrmgr.New(cfg.DataDir, btcdLookup)
 

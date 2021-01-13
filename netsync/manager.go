@@ -991,7 +991,7 @@ func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
 		// high enough (ver 2+).
 		header := &ubmsg.ublock.MsgUBlock().MsgBlock.Header
 		if blockchain.ShouldHaveSerializedBlockHeight(header) {
-			coinbaseTx := ubmsg.ublock.Transactions()[0]
+			coinbaseTx := ubmsg.ublock.Block().Transactions()[0]
 			cbHeight, err := blockchain.ExtractCoinbaseHeight(coinbaseTx)
 			if err != nil {
 				log.Warnf("Unable to extract height from "+

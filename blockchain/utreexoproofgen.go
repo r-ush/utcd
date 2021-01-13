@@ -93,7 +93,7 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	if block.Height() == 0 {
 		return nil, nil
 	}
-	inskip, outskip := DedupeBlock(block)
+	inskip, outskip := block.DedupeBlock()
 	if block.Height() == 119058 {
 		fmt.Println("outskip", outskip)
 		fmt.Println("inskip", inskip)

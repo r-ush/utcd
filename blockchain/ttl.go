@@ -5,9 +5,6 @@
 package blockchain
 
 import (
-	"sort"
-
-	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
 
@@ -77,48 +74,48 @@ func GenTTL(block btcutil.Block, view *UtxoViewpoint, inskip, outskip []uint32) 
 // within the block as a whole, even the coinbase tx.
 // So the coinbase tx in & output numbers affect the skip lists even though
 // the coinbase ins/outs can never be deduped.  it's simpler that way.
-func DedupeBlock(blk *btcutil.Block) (inskip []uint32, outskip []uint32) {
-	var i uint32
-	// wire.Outpoints are comparable with == which is nice.
-	inmap := make(map[wire.OutPoint]uint32)
-
-	// go through txs then inputs building map
-	for cbif0, tx := range blk.Transactions() {
-		if cbif0 == 0 { // coinbase tx can't be deduped
-			i++ // coinbase has 1 input
-			continue
-		}
-		for _, in := range tx.MsgTx().TxIn {
-			inmap[in.PreviousOutPoint] = i
-			i++
-		}
-	}
-
-	i = 0
-	// start over, go through outputs finding skips
-	for cbif0, tx := range blk.Transactions() {
-		if cbif0 == 0 { // coinbase tx can't be deduped
-			i += uint32(len(tx.MsgTx().TxOut)) // coinbase can have multiple inputs
-			continue
-		}
-
-		for outidx, _ := range tx.MsgTx().TxOut {
-			op := wire.OutPoint{Hash: *tx.Hash(), Index: uint32(outidx)}
-			inpos, exists := inmap[op]
-			if exists {
-				inskip = append(inskip, inpos)
-				outskip = append(outskip, i)
-			}
-			i++
-		}
-	}
-
-	// sort inskip list, as it's built in order consumed not created
-	sortUint32s(inskip)
-	return
-}
-
-// it'd be cool if you just had .sort() methods on slices of builtin types...
-func sortUint32s(s []uint32) {
-	sort.Slice(s, func(a, b int) bool { return s[a] < s[b] })
-}
+//func DedupeBlock(blk *btcutil.Block) (inskip []uint32, outskip []uint32) {
+//	var i uint32
+//	// wire.Outpoints are comparable with == which is nice.
+//	inmap := make(map[wire.OutPoint]uint32)
+//
+//	// go through txs then inputs building map
+//	for cbif0, tx := range blk.Transactions() {
+//		if cbif0 == 0 { // coinbase tx can't be deduped
+//			i++ // coinbase has 1 input
+//			continue
+//		}
+//		for _, in := range tx.MsgTx().TxIn {
+//			inmap[in.PreviousOutPoint] = i
+//			i++
+//		}
+//	}
+//
+//	i = 0
+//	// start over, go through outputs finding skips
+//	for cbif0, tx := range blk.Transactions() {
+//		if cbif0 == 0 { // coinbase tx can't be deduped
+//			i += uint32(len(tx.MsgTx().TxOut)) // coinbase can have multiple inputs
+//			continue
+//		}
+//
+//		for outidx, _ := range tx.MsgTx().TxOut {
+//			op := wire.OutPoint{Hash: *tx.Hash(), Index: uint32(outidx)}
+//			inpos, exists := inmap[op]
+//			if exists {
+//				inskip = append(inskip, inpos)
+//				outskip = append(outskip, i)
+//			}
+//			i++
+//		}
+//	}
+//
+//	// sort inskip list, as it's built in order consumed not created
+//	sortUint32s(inskip)
+//	return
+//}
+//
+//// it'd be cool if you just had .sort() methods on slices of builtin types...
+//func sortUint32s(s []uint32) {
+//	sort.Slice(s, func(a, b int) bool { return s[a] < s[b] })
+//}

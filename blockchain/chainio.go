@@ -1293,7 +1293,6 @@ func (b *BlockChain) createChainState() error {
 // database.  When the db does not yet contain any chain state, both it and the
 // chain state are initialized to the genesis block.
 func (b *BlockChain) initChainState() error {
-	fmt.Println("INITCHAIN")
 	// Determine the state of the chain database. We may need to initialize
 	// everything from scratch or upgrade certain buckets.
 	var initialized, hasBlockIndex bool
@@ -1607,6 +1606,30 @@ func (b *BlockChain) FlushMemBlockStore() error {
 	err := b.db.Update(func(dbTx database.Tx) error {
 		fmt.Println("STORE BLOCK", b.memBlocks.blocks.Hash())
 		return dbTx.StoreBlock(b.memBlocks.blocks)
+		//for i := 0; i < len(b.memBlocks.blocks); i++ {
+		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
+		//	if err != nil {
+		//		return err
+		//	}
+		//}
+		//return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (b *BlockChain) PutUtreexoView() error {
+	b.chainLock.Lock()
+	defer b.chainLock.Unlock()
+
+	b.utreexoQuit = true
+
+	err := b.db.Update(func(dbTx database.Tx) error {
+		fmt.Println("STORE Utreexo")
+		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlocks.blocks.Hash())
 		//for i := 0; i < len(b.memBlocks.blocks); i++ {
 		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
 		//	if err != nil {
