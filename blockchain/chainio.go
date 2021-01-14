@@ -1267,6 +1267,7 @@ func (b *BlockChain) createChainState() error {
 			}
 			if b.utreexoCSN {
 				b.memBlocks = &memBlockStore{}
+				b.memBestState = &memBestState{}
 			}
 		}
 
@@ -1452,6 +1453,8 @@ func (b *BlockChain) initChainState() error {
 			b.memBlocks = &memBlockStore{
 				blocks: newBlock,
 			}
+
+			b.memBestState = &memBestState{}
 		}
 		return nil
 	})
@@ -1567,6 +1570,29 @@ func dbStoreBlock(dbTx database.Tx, block *btcutil.Block) error {
 	return dbTx.StoreBlock(block)
 }
 
+type memBestState struct {
+	state   *BestState
+	workSum *big.Int
+	//snapshot []byte
+}
+
+func (b *BlockChain) FlushMemBestState() error {
+	err := b.db.Update(func(dbTx database.Tx) error {
+		// Update best block state.
+		err := dbPutBestState(dbTx,
+			b.memBestState.state, b.memBestState.workSum)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type memBlockStore struct {
 	blocks *btcutil.Block
 }
@@ -1603,9 +1629,21 @@ func (b *BlockChain) FlushMemBlockStore() error {
 
 	b.utreexoQuit = true
 
-	err := b.db.Update(func(dbTx database.Tx) error {
+	err := b.index.flushToDB()
+	if err != nil {
+		return err
+	}
+	err = b.db.Update(func(dbTx database.Tx) error {
 		fmt.Println("STORE BLOCK", b.memBlocks.blocks.Hash())
-		return dbTx.StoreBlock(b.memBlocks.blocks)
+		err := dbTx.StoreBlock(b.memBlocks.blocks)
+		if err != nil {
+			return err
+		}
+		err = dbPutBlockIndex(dbTx, b.memBlocks.blocks.Hash(),
+			b.memBlocks.blocks.Height())
+		if err != nil {
+			return err
+		}
 		//for i := 0; i < len(b.memBlocks.blocks); i++ {
 		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
 		//	if err != nil {
@@ -1613,6 +1651,7 @@ func (b *BlockChain) FlushMemBlockStore() error {
 		//	}
 		//}
 		//return nil
+		return nil
 	})
 	if err != nil {
 		return err
@@ -1839,13 +1878,26 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 	return nil
 }
 
-func (b *BlockChain) FetchProof(height int32) (*btcacc.UData, error) {
+func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 	b.proofFileState.offsetState.rwMutex.RLock()
 	b.proofFileState.proofState.rwMutex.RLock()
 	defer b.proofFileState.offsetState.rwMutex.RUnlock()
 	defer b.proofFileState.proofState.rwMutex.RUnlock()
 
-	_, err := b.proofFileState.offsetState.file.Seek(int64(8*height), 0)
+	var height int32
+	err := b.db.View(func(dbTx database.Tx) error {
+		var err error
+		height, err = dbFetchHeightByHash(dbTx, hash)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = b.proofFileState.offsetState.file.Seek(int64(8*height), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -2020,7 +2072,11 @@ func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 	return ttls
 }
 
-func FetchOnlyTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []int32 {
+func FetchOnlyTTL(dbTx database.Tx, hash *chainhash.Hash) []int32 {
+	height, err := dbFetchHeightByHash(dbTx, hash)
+	if err != nil {
+		panic(err)
+	}
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	serializedCount := ttlBucket.Get(hash[:])
 

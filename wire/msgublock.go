@@ -30,7 +30,7 @@ func (msgu *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) 
 
 // Deserialize a UBlock.  It's just a block then udata.
 func (msgu *MsgUBlock) Deserialize(r io.Reader) (err error) {
-	err = msgu.Deserialize(r)
+	err = msgu.MsgBlock.Deserialize(r)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (msgu *MsgUBlock) BtcEncode(r io.Writer, pver uint32, enc MessageEncoding) 
 }
 
 func (msgu *MsgUBlock) Serialize(w io.Writer) (err error) {
-	err = msgu.Serialize(w)
+	err = msgu.MsgBlock.Serialize(w)
 	if err != nil {
 		return
 	}

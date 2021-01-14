@@ -12,7 +12,7 @@ import (
 )
 
 // MsgGetUBlocks implements the Message interface and represents a bitcoin
-// getblocks message.  It is used to request a list of blocks starting after the
+// getublocks message.  It is used to request a list of blocks starting after the
 // last known hash in the slice of block locator hashes.  The list is returned
 // via an inv message (MsgInv) and is limited by a specific hash to stop at or
 // the maximum number of blocks per message, which is currently 500.
@@ -112,7 +112,7 @@ func (msg *MsgGetUBlocks) BtcEncode(w io.Writer, pver uint32, enc MessageEncodin
 // Command returns the protocol command string for the message.  This is part
 // of the Message interface implementation.
 func (msg *MsgGetUBlocks) Command() string {
-	return CmdGetBlocks
+	return CmdGetUBlocks
 }
 
 // MaxPayloadLength returns the maximum length the payload can be for the
@@ -123,7 +123,7 @@ func (msg *MsgGetUBlocks) MaxPayloadLength(pver uint32) uint32 {
 	return 4 + MaxVarIntPayload + (MaxBlockLocatorsPerMsg * chainhash.HashSize) + chainhash.HashSize
 }
 
-// NewMsgGetUBlocks returns a new bitcoin getblocks message that conforms to the
+// NewMsgGetUBlocks returns a new bitcoin getublocks message that conforms to the
 // Message interface using the passed parameters and defaults for the remaining
 // fields.
 func NewMsgGetUBlocks(hashStop *chainhash.Hash) *MsgGetUBlocks {

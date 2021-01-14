@@ -782,6 +782,45 @@ func (sp *serverPeer) OnGetBlocks(_ *peer.Peer, msg *wire.MsgGetBlocks) {
 	}
 }
 
+// OnGetUBlocks is invoked when a peer receives a getublocks bitcoin
+// message.
+func (sp *serverPeer) OnGetUBlocks(_ *peer.Peer, msg *wire.MsgGetUBlocks) {
+	// Find the most recent known block in the best chain based on the block
+	// locator and fetch all of the block hashes after it until either
+	// wire.MaxBlocksPerMsg have been fetched or the provided stop hash is
+	// encountered.
+	//
+	// Use the block after the genesis block if no other blocks in the
+	// provided locator are known.  This does mean the client will start
+	// over with the genesis block if unknown block locators are provided.
+	//
+	// This mirrors the behavior in the reference implementation.
+	chain := sp.server.chain
+	hashList := chain.LocateBlocks(msg.BlockLocatorHashes, &msg.HashStop,
+		wire.MaxBlocksPerMsg)
+
+	// Generate inventory message.
+	invMsg := wire.NewMsgInv()
+	for i := range hashList {
+		iv := wire.NewInvVect(wire.InvTypeUBlock, &hashList[i])
+		invMsg.AddInvVect(iv)
+	}
+
+	// Send the inventory message if there is anything to send.
+	if len(invMsg.InvList) > 0 {
+		invListLen := len(invMsg.InvList)
+		if invListLen == wire.MaxBlocksPerMsg {
+			// Intentionally use a copy of the final hash so there
+			// is not a reference into the inventory slice which
+			// would prevent the entire slice from being eligible
+			// for GC as soon as it's sent.
+			continueHash := invMsg.InvList[invListLen-1].Hash
+			sp.continueHash = &continueHash
+		}
+		sp.QueueMessage(invMsg, nil)
+	}
+}
+
 // OnGetHeaders is invoked when a peer receives a getheaders bitcoin
 // message.
 func (sp *serverPeer) OnGetHeaders(_ *peer.Peer, msg *wire.MsgGetHeaders) {
@@ -1541,6 +1580,8 @@ func (s *server) pushBlockMsg(sp *serverPeer, hash *chainhash.Hash, doneChan cha
 	if !sendInv {
 		dc = doneChan
 	}
+	//coinbaseWitness := msgBlock.Transactions[0].TxIn[0].Witness
+	//fmt.Println("coinbaseWitness block", coinbaseWitness)
 	sp.QueueMessageWithEncoding(&msgBlock, dc, encoding)
 
 	// When the peer requests the final block that was advertised in
@@ -1622,14 +1663,43 @@ func (s *server) pushMerkleBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 
 func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	doneChan chan<- struct{}, waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
-	block, err := s.chain.BlockByHash(hash)
+	//block, err := s.chain.BlockByHash(hash)
+	//if err != nil {
+	//	return err
+	//}
+	// Fetch the raw block bytes from the database.
+	var blockBytes []byte
+	err := sp.server.db.View(func(dbTx database.Tx) error {
+		var err error
+		blockBytes, err = dbTx.FetchBlock(hash)
+		return err
+	})
 	if err != nil {
+		peerLog.Tracef("Unable to fetch requested block hash %v: %v",
+			hash, err)
+
+		if doneChan != nil {
+			doneChan <- struct{}{}
+		}
+		return err
+	}
+
+	// Deserialize the block.
+	var msgBlock wire.MsgBlock
+	err = msgBlock.Deserialize(bytes.NewReader(blockBytes))
+	if err != nil {
+		peerLog.Tracef("Unable to deserialize requested block hash "+
+			"%v: %v", hash, err)
+
+		if doneChan != nil {
+			doneChan <- struct{}{}
+		}
 		return err
 	}
 
 	var ttls []int32
 	err = sp.server.db.View(func(dbTx database.Tx) error {
-		ttls = blockchain.FetchOnlyTTL(dbTx, block.Height(), hash)
+		ttls = blockchain.FetchOnlyTTL(dbTx, hash)
 		return nil
 	})
 	//if err != nil {
@@ -1642,14 +1712,14 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	//	return err
 	//}
 
-	ud, err := s.chain.FetchProof(block.Height())
+	ud, err := s.chain.FetchProof(hash)
 	if err != nil {
 		return err
 	}
 	ud.TxoTTLs = ttls
 
 	ublock := wire.MsgUBlock{
-		MsgBlock:    *block.MsgBlock(),
+		MsgBlock:    msgBlock,
 		UtreexoData: *ud,
 	}
 
@@ -1666,6 +1736,10 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	if !sendInv {
 		dc = doneChan
 	}
+
+	//coinbaseWitness := msgBlock.Transactions[0].TxIn[0].Witness
+	//fmt.Println("coinbaseWitness", coinbaseWitness)
+
 	sp.QueueMessageWithEncoding(&ublock, dc, encoding)
 
 	// When the peer requests the final block that was advertised in
@@ -2135,6 +2209,7 @@ func newPeerConfig(sp *serverPeer) *peer.Config {
 			OnHeaders:      sp.OnHeaders,
 			OnGetData:      sp.OnGetData,
 			OnGetBlocks:    sp.OnGetBlocks,
+			OnGetUBlocks:   sp.OnGetUBlocks,
 			OnGetHeaders:   sp.OnGetHeaders,
 			OnGetCFilters:  sp.OnGetCFilters,
 			OnGetCFHeaders: sp.OnGetCFHeaders,

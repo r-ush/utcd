@@ -42,6 +42,19 @@ const (
 	MaxScriptElementSize  = 520 // Max bytes pushable to the stack.
 )
 
+//var parsedOpcodePool = sync.Pool{
+//	New: func() interface{} {
+//		// The Pool's New function should generally only return pointer
+//		// types, since a pointer can be put into the return interface
+//		// value without an allocation:
+//		//return *new([]parsedOpcode)
+//		h := make([]parsedOpcode, 10000)
+//		return h
+//	},
+//}
+
+//var parsedOpcodeBuf []parsedOpcode
+
 // isSmallInt returns whether or not the opcode is considered a small integer,
 // which is an OP_0, or OP_1 through OP_16.
 func isSmallInt(op *opcode) bool {
@@ -196,6 +209,12 @@ func IsPushOnlyScript(script []byte) bool {
 // the list of parsed opcodes up to the point of failure along with the error.
 func parseScriptTemplate(script []byte, opcodes *[256]opcode) ([]parsedOpcode, error) {
 	retScript := make([]parsedOpcode, 0, len(script))
+	//fmt.Println("before", len(retScript))
+	//fmt.Println("before", cap(retScript))
+	//scriptCopy := script
+	//retScript := parsedOpcodePool.Get().([]parsedOpcode)
+	//retScript = retScript[:0]
+
 	for i := 0; i < len(script); {
 		instr := script[i]
 		op := &opcodes[instr]
@@ -275,6 +294,7 @@ func parseScriptTemplate(script []byte, opcodes *[256]opcode) ([]parsedOpcode, e
 		retScript = append(retScript, pop)
 	}
 
+	//parsedOpcodePool.Put(retScript)
 	return retScript, nil
 }
 

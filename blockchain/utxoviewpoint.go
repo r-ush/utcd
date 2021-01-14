@@ -656,8 +656,8 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 
 	var txonum uint32
 	var added int
-	for coinbaseif0, tx := range ub.Block().MsgBlock().Transactions {
-		for idx, txOut := range tx.TxOut {
+	for coinbaseif0, tx := range ub.Block().Transactions() {
+		for idx, txOut := range tx.MsgTx().TxOut {
 			// Skip all the OP_RETURNs
 			if isUnspendable(txOut) {
 				txonum++
@@ -669,7 +669,7 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 					txOut, ub.Block().Height(), coinbaseif0 == 0)
 				op := wire.OutPoint{
 					Index: uint32(idx),
-					Hash:  tx.TxHash(),
+					Hash:  *tx.Hash(),
 				}
 				m[op] = utxo
 				outskip = outskip[1:]

@@ -339,6 +339,7 @@ func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) 
 	// enough to potentially accept it into the block chain.
 	isMainChain, err := b.maybeAcceptUBlock(ublock, flags)
 	if err != nil {
+		panic(err)
 		return false, false, err
 	}
 

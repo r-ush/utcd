@@ -114,6 +114,7 @@ type BlockChain struct {
 	ttl              bool // enable time-to-live tracking for txos
 	utreexoLookAhead int  // set a value for the ttl
 	memBlocks        *memBlockStore
+	memBestState     *memBestState
 	proofFileState   *ProofFileState
 	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
 
@@ -417,7 +418,8 @@ func (b *BlockChain) calcSequenceLock(node *blockNode, tx *btcutil.Tx, utxoView 
 				"transaction %s:%d either does not exist or "+
 				"has already been spent", txIn.PreviousOutPoint,
 				tx.Hash(), txInIndex)
-			return sequenceLock, ruleError(ErrMissingTxOut, str)
+			panic(str)
+			//return sequenceLock, ruleError(ErrMissingTxOut, str)
 		}
 
 		// If the input height is set to the mempool height, then we
@@ -736,11 +738,11 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, view
 		}
 	}
 
-	// Write any block status changes to DB before updating best state.
-	err := b.index.flushToDB()
-	if err != nil {
-		return err
-	}
+	//// Write any block status changes to DB before updating best state.
+	//err := b.index.flushToDB()
+	//if err != nil {
+	//	return err
+	//}
 
 	// Generate a new best state snapshot that will be used to update the
 	// database and later memory if all database updates are successful.
@@ -754,67 +756,70 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, view
 		curTotalTxns+numTxns, node.CalcPastMedianTime())
 
 	// Atomically insert info into the database.
-	err = b.db.Update(func(dbTx database.Tx) error {
-		//if state.Hash != *ublock.Hash() {
-		//	s := fmt.Errorf("state hash %v, ublock hash %v", state.Hash, ublock.Hash())
-		//	panic(s)
-		//}
-		//fmt.Printf("state hash %v, ublock hash %v\n", state.Hash, ublock.Hash())
-		// Update best block state.
-		err := dbPutBestState(dbTx, state, node.workSum)
-		if err != nil {
-			return err
-		}
+	//err = b.db.Update(func(dbTx database.Tx) error {
+	//if state.Hash != *ublock.Hash() {
+	//	s := fmt.Errorf("state hash %v, ublock hash %v", state.Hash, ublock.Hash())
+	//	panic(s)
+	//}
+	//fmt.Printf("state hash %v, ublock hash %v\n", state.Hash, ublock.Hash())
+	// Update best block state.
+	//err := dbPutBestState(dbTx, state, node.workSum)
+	//if err != nil {
+	//	return err
+	//}
 
-		// Add the block hash and height to the block index which tracks
-		// the main chain.
-		err = dbPutBlockIndex(dbTx, ublock.Hash(), node.height)
-		if err != nil {
-			return err
-		}
+	b.memBestState.state = state
+	b.memBestState.workSum = node.workSum
 
-		// Update the utxo set using the state of the utxo view.  This
-		// entails removing all of the utxos spent and adding the new
-		// ones created by the block.
-		//err = dbPutUtxoView(dbTx, view)
-		//if err != nil {
-		//	return err
-		//}
+	//// Add the block hash and height to the block index which tracks
+	//// the main chain.
+	//err = dbPutBlockIndex(dbTx, ublock.Hash(), node.height)
+	//if err != nil {
+	//	return err
+	//}
 
-		//err = b.utreexoViewpoint.Modify(ublock)
-		//if err != nil {
-		//	return err
-		//}
+	// Update the utxo set using the state of the utxo view.  This
+	// entails removing all of the utxos spent and adding the new
+	// ones created by the block.
+	//err = dbPutUtxoView(dbTx, view)
+	//if err != nil {
+	//	return err
+	//}
 
-		//err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, *ublock.Hash())
-		//if err != nil {
-		//	return err
-		//}
+	//err = b.utreexoViewpoint.Modify(ublock)
+	//if err != nil {
+	//	return err
+	//}
 
-		// Update the transaction spend journal by adding a record for
-		// the block that contains all txos spent by it.
-		//err = dbPutSpendJournalEntry(dbTx, ublock.Hash(), stxos)
-		//if err != nil {
-		//	return err
-		//}
+	//err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, *ublock.Hash())
+	//if err != nil {
+	//	return err
+	//}
 
-		b.memBlocks.StoreBlock(ublock.Block())
+	// Update the transaction spend journal by adding a record for
+	// the block that contains all txos spent by it.
+	//err = dbPutSpendJournalEntry(dbTx, ublock.Hash(), stxos)
+	//if err != nil {
+	//	return err
+	//}
 
-		//// Allow the index manager to call each of the currently active
-		//// optional indexes with the block being connected so they can
-		//// update themselves accordingly.
-		//if b.indexManager != nil {
-		//	err := b.indexManager.ConnectBlock(dbTx, ublock.Block(), stxos)
-		//	if err != nil {
-		//		return err
-		//	}
-		//}
+	b.memBlocks.StoreBlock(ublock.Block())
 
-		return nil
-	})
-	if err != nil {
-		return err
-	}
+	//// Allow the index manager to call each of the currently active
+	//// optional indexes with the block being connected so they can
+	//// update themselves accordingly.
+	//if b.indexManager != nil {
+	//	err := b.indexManager.ConnectBlock(dbTx, ublock.Block(), stxos)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+
+	//return nil
+	//})
+	//if err != nil {
+	//	return err
+	//}
 
 	// This node is now the end of the best chain.
 	b.bestChain.SetTip(node)
@@ -1432,8 +1437,8 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 //
 // This function MUST be called with the chain state lock held (for writes).
 func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
-	fastAdd := flags&BFFastAdd == BFFastAdd
-	//var fastAdd bool
+	//fastAdd := flags&BFFastAdd == BFFastAdd
+	var fastAdd bool
 
 	flushIndexState := func() {
 		// Intentionally ignore errors writing updated node status to DB. If
@@ -1471,7 +1476,7 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 				return false, err
 			}
 
-			flushIndexState()
+			//flushIndexState()
 
 			if err != nil {
 				return false, err

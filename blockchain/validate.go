@@ -390,7 +390,8 @@ func CountP2SHSigOps(tx *btcutil.Tx, isCoinBaseTx bool, utxoView *UtxoViewpoint)
 				"transaction %s:%d either does not exist or "+
 				"has already been spent", txIn.PreviousOutPoint,
 				tx.Hash(), txInIndex)
-			return 0, ruleError(ErrMissingTxOut, str)
+			panic(str)
+			//return 0, ruleError(ErrMissingTxOut, str)
 		}
 
 		// We're only interested in pay-to-script-hash types, so skip
@@ -790,6 +791,7 @@ func (b *BlockChain) checkBlockContext(block *btcutil.Block, prevNode *blockNode
 		// If segwit is active, then we'll need to fully validate the
 		// new witness commitment for adherence to the rules.
 		if segwitState == ThresholdActive {
+			//fmt.Println("CHECKING SEGWIT")
 			// Validate the witness commitment (if any) within the
 			// block.  This involves asserting that if the coinbase
 			// contains the special commitment output, then this
@@ -886,7 +888,8 @@ func CheckTransactionInputs(tx *btcutil.Tx, txHeight int32, utxoView *UtxoViewpo
 				"transaction %s:%d either does not exist or "+
 				"has already been spent", txIn.PreviousOutPoint,
 				tx.Hash(), txInIndex)
-			return 0, ruleError(ErrMissingTxOut, str)
+			panic(str)
+			//return 0, ruleError(ErrMissingTxOut, str)
 		}
 
 		// Ensure the transaction is not spending coins which have not

@@ -437,6 +437,11 @@ func (msg *MsgTx) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error
 	if err != nil {
 		return err
 	}
+	//buf := make([]byte, 4)
+	//if _, err := io.ReadFull(r, buf); err != nil {
+	//	return err
+	//}
+	//version := byteOrder.Uint32(buf)
 	msg.Version = int32(version)
 
 	count, err := ReadVarInt(r, pver)
@@ -444,10 +449,15 @@ func (msg *MsgTx) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error
 		return err
 	}
 
+	//fmt.Println("MSGTX DECODE witness?", enc)
+
 	// A count of zero (meaning no TxIn's to the uninitiated) means that the
 	// value is a TxFlagMarker, and hence indicates the presence of a flag.
 	var flag [1]TxFlag
+	//fmt.Println("count == TxFlagMarker", count == TxFlagMarker)
+	//fmt.Println("enc == WitnessEncoding", enc == WitnessEncoding)
 	if count == TxFlagMarker && enc == WitnessEncoding {
+		//fmt.Println("WITNESS0")
 		// The count varint was in fact the flag marker byte. Next, we need to
 		// read the flag value, which is a single byte.
 		if _, err = io.ReadFull(r, flag[:]); err != nil {
@@ -561,6 +571,7 @@ func (msg *MsgTx) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error
 	// If the transaction's flag byte isn't 0x00 at this point, then one or
 	// more of its inputs has accompanying witness data.
 	if flag[0] != 0 && enc == WitnessEncoding {
+		//fmt.Println("WITNESS1")
 		for _, txin := range msg.TxIn {
 			// For each input, the witness is encoded as a stack
 			// with one or more items. Therefore, we first read a
@@ -602,6 +613,11 @@ func (msg *MsgTx) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error
 		returnScriptBuffers()
 		return err
 	}
+	//if _, err := io.ReadFull(r, buf); err != nil {
+	//	returnScriptBuffers()
+	//	return err
+	//}
+	//msg.LockTime = byteOrder.Uint32(buf)
 
 	// Create a single allocation to house all of the scripts and set each
 	// input signature script and output public key script to the
@@ -704,7 +720,13 @@ func (msg *MsgTx) DeserializeNoWitness(r io.Reader) error {
 // See Serialize for encoding transactions to be stored to disk, such as in a
 // database, as opposed to encoding transactions for the wire.
 func (msg *MsgTx) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
-	err := binarySerializer.PutUint32(w, littleEndian, uint32(msg.Version))
+	//err := binarySerializer.PutUint32(w, littleEndian, uint32(msg.Version))
+	//if err != nil {
+	//	return err
+	//}
+	buf := make([]byte, 4)
+	byteOrder.PutUint32(buf, uint32(msg.Version))
+	_, err := w.Write(buf)
 	if err != nil {
 		return err
 	}
@@ -762,7 +784,14 @@ func (msg *MsgTx) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error
 		}
 	}
 
-	return binarySerializer.PutUint32(w, littleEndian, msg.LockTime)
+	//return binarySerializer.PutUint32(w, littleEndian, msg.LockTime)
+	byteOrder.PutUint32(buf, msg.LockTime)
+	_, err = w.Write(buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // HasWitness returns false if none of the inputs within the transaction
@@ -926,7 +955,12 @@ func readOutPoint(r io.Reader, pver uint32, version int32, op *OutPoint) error {
 		return err
 	}
 
-	op.Index, err = binarySerializer.Uint32(r, littleEndian)
+	//op.Index, err = binarySerializer.Uint32(r, littleEndian)
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return err
+	}
+	op.Index = byteOrder.Uint32(buf)
 	return err
 }
 
@@ -939,6 +973,13 @@ func writeOutPoint(w io.Writer, pver uint32, version int32, op *OutPoint) error 
 	}
 
 	return binarySerializer.PutUint32(w, littleEndian, op.Index)
+	//buf := make([]byte, 4)
+	//byteOrder.PutUint32(buf, op.Index)
+	//_, err = w.Write(buf)
+	//if err != nil {
+	//	return err
+	//}
+	//return nil
 }
 
 // readScript reads a variable length byte array that represents a transaction
@@ -1003,6 +1044,14 @@ func writeTxIn(w io.Writer, pver uint32, version int32, ti *TxIn) error {
 	}
 
 	return binarySerializer.PutUint32(w, littleEndian, ti.Sequence)
+	//buf := make([]byte, 4)
+	//byteOrder.PutUint32(buf, ti.Sequence)
+	//_, err = w.Write(buf)
+	//if err != nil {
+	//	return err
+	//}
+
+	//return nil
 }
 
 // readTxOut reads the next sequence of bytes from r as a transaction output
@@ -1028,6 +1077,9 @@ func WriteTxOut(w io.Writer, pver uint32, version int32, to *TxOut) error {
 	if err != nil {
 		return err
 	}
+	//buf := make([]byte, 8)
+	//byteOrder.PutUint64(buf, uint64(to.Value))
+	//_, err := w.Write(buf)
 
 	return WriteVarBytes(w, pver, to.PkScript)
 }

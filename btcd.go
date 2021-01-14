@@ -188,6 +188,11 @@ func btcdMain(serverChan chan<- *server) error {
 			return err
 		}
 
+		err = server.chain.FlushMemBestState()
+		if err != nil {
+			return err
+		}
+
 		err = server.chain.PutUtreexoView()
 		if err != nil {
 			return err
@@ -328,6 +333,7 @@ func main() {
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
 	debug.SetGCPercent(10)
+	//runtime.MemProfileRate = 1
 
 	// Up some limits.
 	if err := limits.SetLimits(); err != nil {
@@ -353,4 +359,8 @@ func main() {
 	if err := btcdMain(nil); err != nil {
 		os.Exit(1)
 	}
+	//runtime.GC()
+	//memf, _ := os.Create("memprof")
+	//pprof.WriteHeapProfile(memf)
+	//defer memf.Close()
 }

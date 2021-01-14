@@ -328,6 +328,8 @@ func (bi *blockIndex) flushToDB() error {
 		return nil
 	}
 
+	// NOTE utcd: we don't care about the index since we're not saving any blocks
+	//var err error
 	err := bi.db.Update(func(dbTx database.Tx) error {
 		for node := range bi.dirty {
 			err := dbStoreBlockNode(dbTx, node)

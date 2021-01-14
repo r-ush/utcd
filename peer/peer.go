@@ -919,7 +919,7 @@ func (p *Peer) PushGetUBlocksMsg(locator blockchain.BlockLocator, stopHash *chai
 	p.prevGetBlocksMtx.Unlock()
 
 	if isDuplicate {
-		log.Tracef("Filtering duplicate [getblocks] with begin "+
+		log.Tracef("Filtering duplicate [getublocks] with begin "+
 			"hash %v, stop hash %v", beginHash, stopHash)
 		return nil
 	}
@@ -1514,6 +1514,11 @@ out:
 				p.cfg.Listeners.OnGetBlocks(p, msg)
 			}
 
+		case *wire.MsgGetUBlocks:
+			if p.cfg.Listeners.OnGetBlocks != nil {
+				p.cfg.Listeners.OnGetUBlocks(p, msg)
+			}
+
 		case *wire.MsgGetHeaders:
 			if p.cfg.Listeners.OnGetHeaders != nil {
 				p.cfg.Listeners.OnGetHeaders(p, msg)
@@ -1882,6 +1887,8 @@ func (p *Peer) QueueMessageWithEncoding(msg wire.Message, doneChan chan<- struct
 			}()
 		}
 		return
+	}
+	if msg.Command() == "inv" {
 	}
 	p.outputQueue <- outMsg{msg: msg, encoding: encoding, doneChan: doneChan}
 }

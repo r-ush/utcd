@@ -142,10 +142,10 @@ func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFla
 	newNode.status = statusDataStored
 
 	b.index.AddNode(newNode)
-	err = b.index.flushToDB()
-	if err != nil {
-		return false, err
-	}
+	//err = b.index.flushToDB()
+	//if err != nil {
+	//	return false, err
+	//}
 
 	isMainChain, err := b.connectBestChainUBlock(newNode, ublock, flags)
 	if err != nil {
