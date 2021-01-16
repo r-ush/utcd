@@ -708,8 +708,7 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 
 	if sm.utreexoCSN {
 		log.Warnf("Got unrequested block (not a ublock) %v from %s -- "+
-			"disconnecting", blockHash, peer.Addr())
-		peer.Disconnect()
+			"ignoring block", blockHash, peer.Addr())
 		return
 	}
 

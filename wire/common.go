@@ -21,7 +21,7 @@ const (
 
 	// binaryFreeListMaxItems is the number of buffers to keep in the free
 	// list to use for binary serialization and deserialization.
-	binaryFreeListMaxItems = 1024 * 512
+	binaryFreeListMaxItems = 1024
 )
 
 var (
@@ -32,8 +32,6 @@ var (
 	// bigEndian is a convenience variable since binary.BigEndian is quite
 	// long.
 	bigEndian = binary.BigEndian
-
-	byteOrder = binary.LittleEndian
 )
 
 // binaryFreeList defines a concurrent safe free list of byte slices (up to the

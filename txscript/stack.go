@@ -96,6 +96,7 @@ func (s *stack) PopInt() (scriptNum, error) {
 func (s *stack) PopBool() (bool, error) {
 	so, err := s.PopByteArray()
 	if err != nil {
+		panic(err)
 		return false, err
 	}
 
@@ -108,7 +109,6 @@ func (s *stack) PeekByteArray(idx int32) ([]byte, error) {
 	if idx < 0 || idx >= sz {
 		str := fmt.Sprintf("index %d is invalid for stack size %d", idx,
 			sz)
-		panic(str)
 		return nil, scriptError(ErrInvalidStackOperation, str)
 	}
 
@@ -149,7 +149,6 @@ func (s *stack) nipN(idx int32) ([]byte, error) {
 	if idx < 0 || idx > sz-1 {
 		str := fmt.Sprintf("index %d is invalid for stack size %d", idx,
 			sz)
-		panic(str)
 		return nil, scriptError(ErrInvalidStackOperation, str)
 	}
 

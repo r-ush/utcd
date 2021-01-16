@@ -720,16 +720,16 @@ func (msg *MsgTx) DeserializeNoWitness(r io.Reader) error {
 // See Serialize for encoding transactions to be stored to disk, such as in a
 // database, as opposed to encoding transactions for the wire.
 func (msg *MsgTx) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
-	//err := binarySerializer.PutUint32(w, littleEndian, uint32(msg.Version))
-	//if err != nil {
-	//	return err
-	//}
-	buf := make([]byte, 4)
-	byteOrder.PutUint32(buf, uint32(msg.Version))
-	_, err := w.Write(buf)
+	err := binarySerializer.PutUint32(w, littleEndian, uint32(msg.Version))
 	if err != nil {
 		return err
 	}
+	//buf := make([]byte, 4)
+	//byteOrder.PutUint32(buf, uint32(msg.Version))
+	//_, err := w.Write(buf)
+	//if err != nil {
+	//	return err
+	//}
 
 	// If the encoding version is set to WitnessEncoding, and the Flags
 	// field for the MsgTx aren't 0x00, then this indicates the transaction
@@ -784,14 +784,14 @@ func (msg *MsgTx) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error
 		}
 	}
 
-	//return binarySerializer.PutUint32(w, littleEndian, msg.LockTime)
-	byteOrder.PutUint32(buf, msg.LockTime)
-	_, err = w.Write(buf)
-	if err != nil {
-		return err
-	}
+	return binarySerializer.PutUint32(w, littleEndian, msg.LockTime)
+	//byteOrder.PutUint32(buf, msg.LockTime)
+	//_, err = w.Write(buf)
+	//if err != nil {
+	//	return err
+	//}
 
-	return nil
+	//return nil
 }
 
 // HasWitness returns false if none of the inputs within the transaction
@@ -955,12 +955,12 @@ func readOutPoint(r io.Reader, pver uint32, version int32, op *OutPoint) error {
 		return err
 	}
 
-	//op.Index, err = binarySerializer.Uint32(r, littleEndian)
-	buf := make([]byte, 4)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return err
-	}
-	op.Index = byteOrder.Uint32(buf)
+	op.Index, err = binarySerializer.Uint32(r, littleEndian)
+	//buf := make([]byte, 4)
+	//if _, err := io.ReadFull(r, buf); err != nil {
+	//	return err
+	//}
+	//op.Index = byteOrder.Uint32(buf)
 	return err
 }
 

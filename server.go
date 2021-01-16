@@ -593,7 +593,6 @@ func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
 }
 
 func (sp *serverPeer) OnUBlock(_ *peer.Peer, msg *wire.MsgUBlock, buf []byte) {
-	// Convert the raw MsgBlock to a btcutil.Block which provides some
 	// convenience methods and things such as hash caching.
 	ublock := btcutil.NewUBlockFromBlockAndBytes(msg, buf)
 
@@ -708,7 +707,7 @@ func (sp *serverPeer) OnGetData(_ *peer.Peer, msg *wire.MsgGetData) {
 		case wire.InvTypeFilteredBlock:
 			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
 		case wire.InvTypeUBlock:
-			err = sp.server.pushUBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
+			err = sp.server.pushUBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
 		default:
 			peerLog.Warnf("Unknown type in inventory request %d",
 				iv.Type)
@@ -1580,8 +1579,6 @@ func (s *server) pushBlockMsg(sp *serverPeer, hash *chainhash.Hash, doneChan cha
 	if !sendInv {
 		dc = doneChan
 	}
-	//coinbaseWitness := msgBlock.Transactions[0].TxIn[0].Witness
-	//fmt.Println("coinbaseWitness block", coinbaseWitness)
 	sp.QueueMessageWithEncoding(&msgBlock, dc, encoding)
 
 	// When the peer requests the final block that was advertised in
@@ -1736,9 +1733,6 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	if !sendInv {
 		dc = doneChan
 	}
-
-	//coinbaseWitness := msgBlock.Transactions[0].TxIn[0].Witness
-	//fmt.Println("coinbaseWitness", coinbaseWitness)
 
 	sp.QueueMessageWithEncoding(&ublock, dc, encoding)
 

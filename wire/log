@@ -1,0 +1,413 @@
+1a2
+> // Copyright (c) 2015-2020 The Decred developers
+15c16
+< 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+---
+> 	"github.com/decred/dcrd/chaincfg/chainhash"
+24c25,31
+< 	binaryFreeListMaxItems = 1024 * 512
+---
+> 	binaryFreeListMaxItems = 1024
+> 
+> 	// strictAsciiRangeLower is the lower limit of the strict ASCII range.
+> 	strictAsciiRangeLower = 0x20
+> 
+> 	// strictAsciiRangeUpper is the upper limit of the strict ASCII range.
+> 	strictAsciiRangeUpper = 0x7e
+35,36d41
+< 
+< 	byteOrder = binary.LittleEndian
+178,179c183,184
+< var errNonCanonicalVarInt = "non-canonical varint %x - discriminant %x must " +
+< 	"encode a value greater than %x"
+---
+> var nonCanonicalVarIntFormat = "non-canonical varint %x - discriminant " +
+> 	"%x must encode a value greater than %x"
+196a202,217
+> 	case *uint8:
+> 		rv, err := binarySerializer.Uint8(r)
+> 		if err != nil {
+> 			return err
+> 		}
+> 		*e = rv
+> 		return nil
+> 
+> 	case *uint16:
+> 		rv, err := binarySerializer.Uint16(r, littleEndian)
+> 		if err != nil {
+> 			return err
+> 		}
+> 		*e = rv
+> 		return nil
+> 
+202,206d222
+< 		//buf := make([]byte, 4)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint32(buf)
+216,221d231
+< 		//buf := make([]byte, 4)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint32(buf)
+< 		//*e = rv
+230,235d239
+< 		//buf := make([]byte, 8)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint64(buf)
+< 		//*e = int64(rv)
+244,249d247
+< 		//buf := make([]byte, 8)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint64(buf)
+< 		//*e = rv
+257,261d254
+< 		//buf := make([]byte, 1)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := buf[0]
+275,279d267
+< 		//buf := make([]byte, 4)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint32(buf)
+289,293d276
+< 		//buf := make([]byte, 8)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint64(buf)
+304a288,294
+> 	case *[6]byte:
+> 		_, err := io.ReadFull(r, e[:])
+> 		if err != nil {
+> 			return err
+> 		}
+> 		return nil
+> 
+320a311,317
+> 	case *[32]byte:
+> 		_, err := io.ReadFull(r, e[:])
+> 		if err != nil {
+> 			return err
+> 		}
+> 		return nil
+> 
+333,337d329
+< 		//buf := make([]byte, 8)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint64(buf)
+346,350d337
+< 		//buf := make([]byte, 4)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint32(buf)
+354c341
+< 	case *BitcoinNet:
+---
+> 	case *CurrencyNet:
+359,377c346
+< 		//buf := make([]byte, 4)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := byteOrder.Uint32(buf)
+< 		*e = BitcoinNet(rv)
+< 		return nil
+< 
+< 	case *BloomUpdateType:
+< 		rv, err := binarySerializer.Uint8(r)
+< 		if err != nil {
+< 			return err
+< 		}
+< 		//buf := make([]byte, 1)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := buf[0]
+< 		*e = BloomUpdateType(rv)
+---
+> 		*e = CurrencyNet(rv)
+385,389d353
+< 		//buf := make([]byte, 1)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return err
+< 		//}
+< 		//rv := buf[0]
+421,426d384
+< 		//buf := make([]byte, 4)
+< 		//byteOrder.PutUint32(buf, uint32(e))
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+434,439d391
+< 		//buf := make([]byte, 4)
+< 		//byteOrder.PutUint32(buf, e)
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+447,452d398
+< 		//buf := make([]byte, 8)
+< 		//byteOrder.PutUint64(buf, uint64(e))
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+460,465d405
+< 		//buf := make([]byte, 8)
+< 		//byteOrder.PutUint64(buf, e)
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+472,477d411
+< 			//buf := make([]byte, 1)
+< 			//buf[0] = 0x01
+< 			//_, err := w.Write(buf)
+< 			if err != nil {
+< 				return err
+< 			}
+480,485d413
+< 			//buf := make([]byte, 1)
+< 			//buf[0] = 0x00
+< 			//_, err := w.Write(buf)
+< 			if err != nil {
+< 				return err
+< 			}
+528,533d455
+< 		//buf := make([]byte, 8)
+< 		//byteOrder.PutUint64(buf, uint64(e))
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+541,546d462
+< 		//buf := make([]byte, 4)
+< 		//byteOrder.PutUint32(buf, uint32(e))
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+549c465
+< 	case BitcoinNet:
+---
+> 	case CurrencyNet:
+554,572d469
+< 		//buf := make([]byte, 4)
+< 		//byteOrder.PutUint32(buf, uint32(e))
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+< 		return nil
+< 
+< 	case BloomUpdateType:
+< 		err := binarySerializer.PutUint8(w, uint8(e))
+< 		if err != nil {
+< 			return err
+< 		}
+< 		//buf := make([]byte, 1)
+< 		//buf[0] = uint8(e)
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+580,585d476
+< 		//buf := make([]byte, 1)
+< 		//buf[0] = uint8(e)
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+607a499
+> 	const op = "ReadVarInt"
+620,624d511
+< 		//buf := make([]byte, 8)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return 0, err
+< 		//}
+< 		//sv := byteOrder.Uint64(buf)
+631,632c518,519
+< 			return 0, messageError("ReadVarInt", fmt.Sprintf(
+< 				errNonCanonicalVarInt, rv, discriminant, min))
+---
+> 			msg := fmt.Sprintf(nonCanonicalVarIntFormat, rv, discriminant, min)
+> 			return 0, messageError(op, ErrNonCanonicalVarInt, msg)
+640,644d526
+< 		//buf := make([]byte, 4)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return 0, err
+< 		//}
+< 		//sv := byteOrder.Uint32(buf)
+651,652c533,534
+< 			return 0, messageError("ReadVarInt", fmt.Sprintf(
+< 				errNonCanonicalVarInt, rv, discriminant, min))
+---
+> 			msg := fmt.Sprintf(nonCanonicalVarIntFormat, rv, discriminant, min)
+> 			return 0, messageError(op, ErrNonCanonicalVarInt, msg)
+660,664d541
+< 		//buf := make([]byte, 2)
+< 		//if _, err := io.ReadFull(r, buf); err != nil {
+< 		//	return 0, err
+< 		//}
+< 		//sv := byteOrder.Uint16(buf)
+671,672c548,549
+< 			return 0, messageError("ReadVarInt", fmt.Sprintf(
+< 				errNonCanonicalVarInt, rv, discriminant, min))
+---
+> 			msg := fmt.Sprintf(nonCanonicalVarIntFormat, rv, discriminant, min)
+> 			return 0, messageError(op, ErrNonCanonicalVarInt, msg)
+687,693d563
+< 		//buf := make([]byte, 1)
+< 		//buf[0] = uint8(val)
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+< 		//return nil
+701,707d570
+< 		//buf := make([]byte, 1)
+< 		//buf[0] = 0xfd
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+< 
+709,716d571
+< 		//buf = make([]byte, 2)
+< 		//byteOrder.PutUint16(buf, uint16(val))
+< 		//_, err = w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+< 
+< 		//return nil
+724,729d578
+< 		//buf := make([]byte, 1)
+< 		//buf[0] = 0xfe
+< 		//_, err := w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+731,738d579
+< 		//buf = make([]byte, 4)
+< 		//byteOrder.PutUint32(buf, uint32(val))
+< 		//_, err = w.Write(buf)
+< 		//if err != nil {
+< 		//	return err
+< 		//}
+< 
+< 		//return nil
+745,750d585
+< 	//buf := make([]byte, 1)
+< 	//buf[0] = 0xff
+< 	//_, err := w.Write(buf)
+< 	//if err != nil {
+< 	//	return err
+< 	//}
+752,759d586
+< 	//buf = make([]byte, 8)
+< 	//byteOrder.PutUint64(buf, uint64(val))
+< 	//_, err = w.Write(buf)
+< 	//if err != nil {
+< 	//	return err
+< 	//}
+< 
+< 	//return nil
+791a619
+> 	const op = "ReadVarString"
+801c629
+< 		str := fmt.Sprintf("variable length string is too long "+
+---
+> 		msg := fmt.Sprintf("variable length string is too long "+
+803c631
+< 		return "", messageError("ReadVarString", str)
+---
+> 		return "", messageError(op, ErrVarStringTooLong, msg)
+813a642,683
+> // ReadAsciiVarString reads a variable length string from r and returns it as a
+> // Go string.  A variable length string is encoded as a variable length integer
+> // containing the length of the string followed by the bytes that represent the
+> // string itself.  An error is returned if the length is greater than the
+> // specified maxAllowed argument, greater than the global maximum message
+> // payload length or if the decoded string is not strictly an ascii string.
+> func ReadAsciiVarString(r io.Reader, pver uint32, maxAllowed uint64) (string, error) {
+> 	const op = "ReadAsciiVarString"
+> 	count, err := ReadVarInt(r, pver)
+> 	if err != nil {
+> 		return "", err
+> 	}
+> 
+> 	// Prevent variable length strings that are larger than the specified
+> 	// size or the global maximum payload (whichever is lower).  It would
+> 	// be possible to cause memory exhaustion and panics without a sane
+> 	// upper bound on this count.
+> 	max := maxAllowed
+> 	if maxAllowed > MaxMessagePayload {
+> 		max = MaxMessagePayload
+> 	}
+> 	if count > max {
+> 		msg := fmt.Sprintf("variable length string is too long "+
+> 			"[count %d, max %d]", count, max)
+> 		return "", messageError(op, ErrVarStringTooLong, msg)
+> 	}
+> 
+> 	buf := make([]byte, count)
+> 	_, err = io.ReadFull(r, buf)
+> 	if err != nil {
+> 		return "", err
+> 	}
+> 
+> 	s := string(buf)
+> 	if !isStrictAscii(s) {
+> 		msg := "string is not strict ASCII"
+> 		return "", messageError(op, ErrMalformedStrictString, msg)
+> 	}
+> 
+> 	return s, nil
+> }
+> 
+835c705
+< 
+---
+> 	const op = "ReadVarBytes"
+845c715
+< 		str := fmt.Sprintf("%s is larger than the max allowed size "+
+---
+> 		msg := fmt.Sprintf("%s is larger than the max allowed size "+
+847c717
+< 		return nil, messageError("ReadVarBytes", str)
+---
+> 		return nil, messageError(op, ErrVarBytesTooLong, msg)
+879,883d748
+< 	//buf := make([]byte, 8)
+< 	//if _, err := io.ReadFull(r, buf); err != nil {
+< 	//	return 0, err
+< 	//}
+< 	//rv := byteOrder.Uint64(buf)
+889a755,766
+> }
+> 
+> // isStrictAscii determines returns true if the provided string only contains
+> // runes that are within the strict ASCII range.
+> func isStrictAscii(s string) bool {
+> 	for _, r := range s {
+> 		if r < strictAsciiRangeLower || r > strictAsciiRangeUpper {
+> 			return false
+> 		}
+> 	}
+> 
+> 	return true

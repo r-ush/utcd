@@ -22,6 +22,7 @@ func (msgu *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) 
 	if err != nil {
 		return err
 	}
+
 	msgu.UtreexoData = btcacc.UData{}
 	err = msgu.UtreexoData.Deserialize(r)
 

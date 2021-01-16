@@ -211,12 +211,13 @@ func computeNonWitnessPkScript(sigScript []byte) (PkScript, error) {
 		// The redeem script will always be the last data push of the
 		// signature script, so we'll parse the script into opcodes to
 		// obtain it.
-		parsedOpcodes, err := parseScript(sigScript)
-		if err != nil {
-			return PkScript{}, err
-		}
-		redeemScript := parsedOpcodes[len(parsedOpcodes)-1].data
+		//parsedOpcodes, err := parseScript(sigScript)
+		//if err != nil {
+		//	return PkScript{}, err
+		//}
+		//redeemScript := parsedOpcodes[len(parsedOpcodes)-1].data
 
+		redeemScript := ExtractScriptHash(sigScript)
 		scriptHash := hash160(redeemScript)
 		script, err := payToScriptHashScript(scriptHash)
 		if err != nil {
