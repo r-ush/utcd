@@ -211,6 +211,7 @@ func readMessageHeader(r io.Reader) (int, *messageHeader, error) {
 	var headerBytes [MessageHeaderSize]byte
 	n, err := io.ReadFull(r, headerBytes[:])
 	if err != nil {
+		//panic(err)
 		return n, nil, err
 	}
 	hr := bytes.NewReader(headerBytes[:])
@@ -383,6 +384,7 @@ func ReadMessageWithEncodingN(r io.Reader, pver uint32, btcnet BitcoinNet,
 	// Create struct of appropriate message type based on the command.
 	msg, err := makeEmptyMessage(command)
 	if err != nil {
+		//panic(err)
 		discardInput(r, hdr.length)
 		return totalBytes, nil, nil, messageError("ReadMessage",
 			err.Error())
@@ -405,6 +407,7 @@ func ReadMessageWithEncodingN(r io.Reader, pver uint32, btcnet BitcoinNet,
 	n, err = io.ReadFull(r, payload)
 	totalBytes += n
 	if err != nil {
+		//panic(err)
 		return totalBytes, nil, nil, err
 	}
 
@@ -422,6 +425,7 @@ func ReadMessageWithEncodingN(r io.Reader, pver uint32, btcnet BitcoinNet,
 	pr := bytes.NewBuffer(payload)
 	err = msg.BtcDecode(pr, pver, enc)
 	if err != nil {
+		//panic(err)
 		return totalBytes, nil, nil, err
 	}
 

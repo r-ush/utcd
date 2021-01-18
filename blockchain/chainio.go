@@ -1702,18 +1702,18 @@ type ProofFileState struct {
 	basePath      string
 	currentOffset int64
 	//proofFile, offsetFile *bufio.Writer
-	proofState  *proofFiler
-	offsetState *offsetFiler
+	proofState  proofFiler
+	offsetState offsetFiler
 	//fileWait              *sync.WaitGroup
 }
 
 type proofFiler struct {
-	rwMutex *sync.RWMutex
+	rwMutex sync.RWMutex
 	file    *os.File
 }
 
 type offsetFiler struct {
-	rwMutex *sync.RWMutex
+	rwMutex sync.RWMutex
 	file    *os.File
 }
 
@@ -1735,9 +1735,9 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	if err != nil {
 		return err
 	}
-	pf.proofState = &proofFiler{
+	pf.proofState = proofFiler{
 		file:    proofFile,
-		rwMutex: &sync.RWMutex{},
+		rwMutex: sync.RWMutex{},
 	}
 
 	offsetFilePath := filepath.Join(path, "offset.dat")
@@ -1746,9 +1746,9 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	if err != nil {
 		return err
 	}
-	pf.offsetState = &offsetFiler{
+	pf.offsetState = offsetFiler{
 		file:    offsetFile,
-		rwMutex: &sync.RWMutex{},
+		rwMutex: sync.RWMutex{},
 	}
 
 	pf.currentOffset, err = proofFile.Seek(0, 2)
@@ -1768,9 +1768,9 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	if err != nil {
 		panic(err)
 	}
-	pf.proofState = &proofFiler{
+	pf.proofState = proofFiler{
 		file:    proofFile,
-		rwMutex: &sync.RWMutex{},
+		rwMutex: sync.RWMutex{},
 	}
 
 	offsetFilePath := filepath.Join(path, "offset.dat")
@@ -1778,9 +1778,9 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	if err != nil {
 		panic(err)
 	}
-	pf.offsetState = &offsetFiler{
+	pf.offsetState = offsetFiler{
 		file:    offsetFile,
-		rwMutex: &sync.RWMutex{},
+		rwMutex: sync.RWMutex{},
 	}
 	_, err = pf.offsetState.file.Write(make([]byte, 8))
 	if err != nil {
@@ -1790,24 +1790,7 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	return nil
 }
 
-//func (b *BlockChain) FlushProofFileState() error {
-//	err := b.proofFileState.proofFile.Flush()
-//	if err != nil {
-//		return err
-//	}
-//
-//	err = b.proofFileState.offsetFile.Flush()
-//	if err != nil {
-//		return err
-//	}
-//	return nil
-//}
-
 func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
-	pf.offsetState.rwMutex.Lock()
-	pf.proofState.rwMutex.Lock()
-	defer pf.offsetState.rwMutex.Unlock()
-	defer pf.proofState.rwMutex.Unlock()
 	//if len(ud.Stxos) == 0 {
 	//	fmt.Println("ud height:", ud.Height)
 	//	fmt.Println("ud accproof:", ud.AccProof)
@@ -1820,33 +1803,29 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 
 	//// fmt.Printf("writeProofBlock gets h %d ud %d utxodatas\n",
 	//// ud.Height, len(ud.Stxos))
+	udSize := ud.SerializeSize()
 
 	//// get the new block proof
 	//// put offset in ram
-	//ff.offsets = append(ff.offsets, ff.currentOffset)
-	//// fmt.Printf("expand offsets to %d\n", len(ff.offsets))
-	//// write to offset file so we can resume; offset file is only
-	//// read on startup and always incremented so we shouldn't need to seek
-	err := binary.Write(pf.offsetState.file, binary.BigEndian, pf.currentOffset)
+	pf.offsetState.rwMutex.Lock()
+	_, err := pf.offsetState.file.Seek(int64(8*ud.Height), 0)
+	err = binary.Write(pf.offsetState.file, binary.BigEndian, pf.currentOffset)
 	if err != nil {
 		return err
 	}
-
-	// seek to next block proof location, this file is open in ttl worker
-	// and may write point may have moved
-	//_, _ = pf.proofState.file.Seek(pf.currentOffset, 0)
-
-	//bufBytes := make([]byte, 8)
-	//buf := bytes.NewBuffer(bufBytes)
+	pf.offsetState.rwMutex.Unlock()
 
 	// write to proof file
 	// first write magic 4 bytes
+	// seek to next block proof location, this file is open in ttl worker
+	// and may write point may have moved
+	pf.proofState.rwMutex.Lock()
+	_, _ = pf.proofState.file.Seek(pf.currentOffset, 0)
 	_, err = pf.proofState.file.Write([]byte{0xaa, 0xff, 0xaa, 0xff})
 	if err != nil {
 		return err
 	}
 
-	udSize := ud.SerializeSize()
 	// prefix with size
 	err = binary.Write(pf.proofState.file, binary.BigEndian, uint32(udSize))
 	if err != nil {
@@ -1870,20 +1849,15 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 			ud.Height, pf.currentOffset,
 			int64(ud.SerializeSize())+8, off-pf.currentOffset)
 	}
+	pf.proofState.rwMutex.Unlock()
 
 	// 4B magic & 4B size comes first
 	pf.currentOffset += int64(udSize + 8)
 
-	//ff.fileWait.Done()
 	return nil
 }
 
 func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
-	b.proofFileState.offsetState.rwMutex.RLock()
-	b.proofFileState.proofState.rwMutex.RLock()
-	defer b.proofFileState.offsetState.rwMutex.RUnlock()
-	defer b.proofFileState.proofState.rwMutex.RUnlock()
-
 	var height int32
 	err := b.db.View(func(dbTx database.Tx) error {
 		var err error
@@ -1897,53 +1871,61 @@ func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 		return nil, err
 	}
 
+	b.proofFileState.offsetState.rwMutex.RLock()
 	_, err = b.proofFileState.offsetState.file.Seek(int64(8*height), 0)
 	if err != nil {
 		return nil, err
 	}
 
-	offset := int64(0)
-	err = binary.Read(
-		b.proofFileState.offsetState.file, binary.BigEndian, &offset)
+	offsetBuf := make([]byte, 8)
+	_, err = b.proofFileState.offsetState.file.ReadAt(offsetBuf, int64(8*height))
+	if err != nil {
+		return nil, err
+	}
+	b.proofFileState.offsetState.rwMutex.RUnlock()
+
+	offset := binary.BigEndian.Uint64(offsetBuf)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = b.proofFileState.proofState.file.Seek(offset, 0)
+	b.proofFileState.proofState.rwMutex.RLock()
+	buf := make([]byte, 4)
+	_, err = b.proofFileState.proofState.file.ReadAt(buf, int64(offset))
 	if err != nil {
 		return nil, err
 	}
 
-	magic := make([]byte, 4)
-	_, err = b.proofFileState.proofState.file.Read(magic)
-	if err != nil {
-		return nil, err
-	}
-	//fmt.Printf("magic:%v\n", magic)
-
-	if !bytes.Equal(magic, []byte{0xaa, 0xff, 0xaa, 0xff}) {
+	if !bytes.Equal(buf, []byte{0xaa, 0xff, 0xaa, 0xff}) {
 		return nil, fmt.Errorf("wrong magic")
 	}
+	offset += 4
 
-	//size := binary.BigEndian.Uint32(bufBytes)
-	size := uint32(0)
-	err = binary.Read(
-		b.proofFileState.proofState.file, binary.BigEndian, &size)
+	_, err = b.proofFileState.proofState.file.ReadAt(buf, int64(offset))
+	if err != nil {
+		return nil, err
+	}
+
+	size := binary.BigEndian.Uint32(buf)
+
 	if size > 1<<24 {
 		return nil, fmt.Errorf("size at offest %d says %d which is too big", offset, size)
 	}
-	//fmt.Printf("size:%v\n", size)
 
+	offset += 4
 	udBytes := make([]byte, size)
-	_, err = b.proofFileState.proofState.file.Read(udBytes)
+	_, err = b.proofFileState.proofState.file.ReadAt(udBytes, int64(offset))
 	if err != nil {
 		return nil, err
 	}
 
 	udReader := bytes.NewReader(udBytes)
-
 	ud := btcacc.UData{}
-	ud.Deserialize(udReader)
+	err = ud.Deserialize(udReader)
+	if err != nil {
+		return nil, err
+	}
+	b.proofFileState.proofState.rwMutex.RUnlock()
 
 	return &ud, nil
 }

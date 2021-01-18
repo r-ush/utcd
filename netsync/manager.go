@@ -1198,8 +1198,7 @@ func (sm *SyncManager) fetchHeaderUBlocks() {
 			// witness data in the blocks.
 			if sm.syncPeer.IsWitnessEnabled() {
 				if sm.utreexoCSN {
-					// TODO do witness ublock
-					iv.Type = wire.InvTypeUBlock
+					iv.Type = wire.InvTypeWitnessUBlock
 				} else {
 					iv.Type = wire.InvTypeWitnessBlock
 				}
@@ -1349,6 +1348,13 @@ func (sm *SyncManager) handleNotFoundMsg(nfmsg *notFoundMsg) {
 				delete(state.requestedBlocks, inv.Hash)
 				delete(sm.requestedBlocks, inv.Hash)
 			}
+		case wire.InvTypeWitnessUBlock:
+			fallthrough
+		case wire.InvTypeUBlock:
+			if _, exists := state.requestedBlocks[inv.Hash]; exists {
+				delete(state.requestedBlocks, inv.Hash)
+				delete(sm.requestedBlocks, inv.Hash)
+			}
 
 		case wire.InvTypeWitnessTx:
 			fallthrough
@@ -1374,6 +1380,8 @@ func (sm *SyncManager) haveInventory(invVect *wire.InvVect) (bool, error) {
 		// Ask chain if the block is known to it in any form (main
 		// chain, side chain, or orphan).
 		return sm.chain.HaveBlock(&invVect.Hash)
+	case wire.InvTypeWitnessUBlock:
+		fallthrough
 	case wire.InvTypeUBlock:
 		return sm.chain.HaveBlock(&invVect.Hash)
 
@@ -1417,7 +1425,6 @@ func (sm *SyncManager) haveInventory(invVect *wire.InvVect) (bool, error) {
 // handleInvMsg handles inv messages from all peers.
 // We examine the inventory advertised by the remote peer and act accordingly.
 func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
-	//fmt.Println("HANDLE INV")
 	peer := imsg.peer
 	state, exists := sm.peerStates[peer]
 	if !exists {
@@ -1434,12 +1441,10 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 			lastBlock = i
 			break
 		} else if invVects[i].Type == wire.InvTypeUBlock {
-			//fmt.Println("INV UBLOKC")
 			lastBlock = i
 			break
 		}
 	}
-	//fmt.Println("HIHIHIHIH")
 
 	// If this inv contains a block announcement, and this isn't coming from
 	// our current sync peer or we're current, then update the last
@@ -1449,15 +1454,12 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 	if lastBlock != -1 && (peer != sm.syncPeer || sm.current()) {
 		peer.UpdateLastAnnouncedBlock(&invVects[lastBlock].Hash)
 	}
-	//fmt.Println("HIHIHIHIH1")
 
 	// Ignore invs from peers that aren't the sync if we are not current.
 	// Helps prevent fetching a mass of orphans.
 	if peer != sm.syncPeer && !sm.current() {
-		//fmt.Println("NOT CURRENT")
 		return
 	}
-	//fmt.Println("HIHIHIHIH2")
 
 	// If our chain is current and a peer announces a block we already
 	// know of, then update their current block height.
@@ -1467,7 +1469,6 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 			peer.UpdateLastBlockHeight(blkHeight)
 		}
 	}
-	//fmt.Println("HIHIHIHIH3")
 
 	// Request the advertised inventory if we don't already have it.  Also,
 	// request parent blocks of orphans if we receive one we already have.
@@ -1480,13 +1481,12 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 		case wire.InvTypeUBlock:
 		case wire.InvTypeTx:
 		case wire.InvTypeWitnessBlock:
+		case wire.InvTypeWitnessUBlock:
 		case wire.InvTypeWitnessTx:
 		default:
-			//fmt.Println("contineu")
 			continue
 		}
 
-		//fmt.Println("HIHIHIHIH4")
 		// Add the inventory to the cache of known inventory
 		// for the peer.
 		peer.AddKnownInventory(iv)
@@ -1495,7 +1495,6 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 		if sm.headersFirstMode {
 			continue
 		}
-		//fmt.Println("HIHIHIHIH5")
 
 		// Request the inventory if we don't already have it.
 		haveInv, err := sm.haveInventory(iv)
@@ -1505,7 +1504,6 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				"processing: %v", err)
 			continue
 		}
-		//fmt.Println("HIHIHIHIH6")
 		if !haveInv {
 			if iv.Type == wire.InvTypeTx {
 				// Skip the transaction if it has already been
@@ -1527,10 +1525,48 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 			state.requestQueue = append(state.requestQueue, iv)
 			continue
 		}
-		//fmt.Println("HIHIHIHIH7")
 
 		if iv.Type == wire.InvTypeBlock {
-			//fmt.Println("REQ INV BLCOK")
+			if sm.utreexoCSN {
+				// The block is an orphan block that we already have.
+				// When the existing orphan was processed, it requested
+				// the missing parent blocks.  When this scenario
+				// happens, it means there were more blocks missing
+				// than are allowed into a single inventory message.  As
+				// a result, once this peer requested the final
+				// advertised block, the remote peer noticed and is now
+				// resending the orphan block as an available block
+				// to signal there are more missing blocks that need to
+				// be requested.
+				if sm.chain.IsKnownOrphan(&iv.Hash) {
+					// Request blocks starting at the latest known
+					// up to the root of the orphan that just came
+					// in.
+					orphanRoot := sm.chain.GetOrphanRoot(&iv.Hash)
+					locator, err := sm.chain.LatestBlockLocator()
+					if err != nil {
+						log.Errorf("PEER: Failed to get block "+
+							"locator for the latest block: "+
+							"%v", err)
+						continue
+					}
+					peer.PushGetUBlocksMsg(locator, orphanRoot)
+					continue
+				}
+
+				// We already have the final block advertised by this
+				// inventory message, so force a request for more.  This
+				// should only happen if we're on a really long side
+				// chain.
+				if i == lastBlock {
+					// Request blocks after this one up to the
+					// final one the remote peer knows about (zero
+					// stop hash).
+					locator := sm.chain.BlockLocatorFromHash(&iv.Hash)
+					peer.PushGetUBlocksMsg(locator, &zeroHash)
+				}
+				break
+			}
 			// The block is an orphan block that we already have.
 			// When the existing orphan was processed, it requested
 			// the missing parent blocks.  When this scenario
@@ -1570,9 +1606,7 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 			}
 		}
 
-		//fmt.Println("HIHIHIHIH8")
 		if iv.Type == wire.InvTypeUBlock {
-			//fmt.Println("REQ INV UBLOKC")
 			// The block is an orphan block that we already have.
 			// When the existing orphan was processed, it requested
 			// the missing parent blocks.  When this scenario
@@ -1640,6 +1674,8 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				gdmsg.AddInvVect(iv)
 				numRequested++
 			}
+		case wire.InvTypeWitnessUBlock:
+			fallthrough
 		case wire.InvTypeUBlock:
 			// Request the block if there is not already a pending
 			// request.
@@ -1648,7 +1684,7 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				limitAdd(state.requestedBlocks, iv.Hash, maxRequestedBlocks)
 
 				if peer.IsWitnessEnabled() {
-					iv.Type = wire.InvTypeUBlock
+					iv.Type = wire.InvTypeWitnessUBlock
 				}
 
 				gdmsg.AddInvVect(iv)

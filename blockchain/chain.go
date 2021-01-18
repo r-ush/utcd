@@ -715,19 +715,13 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 	return nil
 }
-func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, view *UtxoViewpoint) error {
+func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) error {
 	// Make sure it's extending the end of the best chain.
 	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
 	if !prevHash.IsEqual(&b.bestChain.Tip().hash) {
 		return AssertError("connectUBlock must be called with a ublock " +
 			"that extends the main chain")
 	}
-
-	//// Sanity check the correct number of stxos are provided.
-	//if len(stxos) != countSpentOutputs(ublock.Block()) {
-	//	return AssertError("connectUBlock called with inconsistent " +
-	//		"spent transaction out information")
-	//}
 
 	// No warnings about unknown rules until the chain is current.
 	if b.isCurrent() {
@@ -770,6 +764,7 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, view
 
 	b.memBestState.state = state
 	b.memBestState.workSum = node.workSum
+	b.memBlocks.StoreBlock(ublock.Block())
 
 	//// Add the block hash and height to the block index which tracks
 	//// the main chain.
@@ -802,8 +797,6 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock, view
 	//if err != nil {
 	//	return err
 	//}
-
-	b.memBlocks.StoreBlock(ublock.Block())
 
 	//// Allow the index manager to call each of the currently active
 	//// optional indexes with the block being connected so they can
@@ -1463,9 +1456,6 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		view := NewUtxoViewpoint()
 		view.SetBestHash(parentHash)
 
-		//stxos := make([]SpentTxOut, 0, countSpentOutputs(ublock.Block()))
-		//fmt.Println("fastadd?", flags&BFFastAdd == BFFastAdd)
-		//fmt.Println("KnownValid?", b.index.NodeStatus(node).KnownValid())
 		if !fastAdd {
 			err := b.checkConnectUBlock(node, ublock, view)
 			if err == nil {
@@ -1488,49 +1478,11 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		// utxos, spend them, and add the new utxos being created by
 		// this block.
 		if fastAdd {
-			//err := view.fetchInputUtxos(b.db, ublock.Block())
-			//if err != nil {
-			//	return false, err
-			//}
-			//err = view.connectTransactions(ublock.Block(), &stxos)
-			//if err != nil {
-			//	return false, err
-			//}
-
-			//err = view.UBlockToUtxoView(*ublock)
-			//if err != nil {
-			//	return false, err
-			//}
-			err := b.utreexoViewpoint.Modify(ublock)
-			if err != nil {
-				return false, err
-			}
+			view.UBlockToUtxoView(*ublock)
 		}
 
-		//inskip, outskip := DedupeBlock(ublock.Block())
-		//if len(stxos) != len(ublock.MsgUBlock().UtreexoData.Stxos) {
-		//	fmt.Printf("on Block height/hash: %v %v, stxos: %v, udata stxos: %v inskip: %v outskip: %v\n",
-		//		ublock.Height(), ublock.Hash(), len(stxos),
-		//		len(ublock.MsgUBlock().UtreexoData.Stxos),
-		//		len(inskip),
-		//		len(outskip))
-
-		//}
-
-		//err := UBlockToStxos(ublock, &stxos)
-		//if err != nil {
-		//	return false, err
-		//}
-		//if len(stxos) != len() {
-		//	fmt.Println("WARNING")
-		//	fmt.Printf("on Block height/hash: %v %v, stxos: %v, tmpStxos: %v\n", // dedupe: %v\n",
-		//		ublock.Height(), ublock.Hash(), len(stxos),
-		//		len(tmpStxos))
-		//	//len(inskip))
-
-		//}
 		// Connect the block to the main chain.
-		err := b.connectUBlock(node, ublock, view)
+		err := b.connectUBlock(node, ublock)
 		if err != nil {
 			// If we got hit with a rule error, then we'll mark
 			// that status of the block as invalid and flush the
@@ -1549,7 +1501,7 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		// disk again.
 		if fastAdd || !b.index.NodeStatus(node).KnownValid() {
 			b.index.SetStatusFlags(node, statusValid)
-			flushIndexState()
+			//flushIndexState()
 		}
 
 		return true, nil

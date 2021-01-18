@@ -650,7 +650,6 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 	}
 
 	_, outskip := ub.Block().DedupeBlock()
-	//fmt.Println("OUTSKIP:", outskip)
 
 	shouldadd := len(outskip)
 
@@ -663,7 +662,7 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 				txonum++
 				continue
 			}
-			// Skip txos on the skip list
+			// only add txouts for the same block spends
 			if len(outskip) > 0 && outskip[0] == txonum {
 				utxo := NewUtxoEntry(
 					txOut, ub.Block().Height(), coinbaseif0 == 0)

@@ -21,7 +21,7 @@ const (
 
 	// binaryFreeListMaxItems is the number of buffers to keep in the free
 	// list to use for binary serialization and deserialization.
-	binaryFreeListMaxItems = 1024
+	binaryFreeListMaxItems = 1024 * 1024
 )
 
 var (

@@ -1207,6 +1207,10 @@ func (p *Peer) maybeAddDeadline(pendingResponses map[string]time.Time, msgCmd st
 		// Expects an inv message.
 		pendingResponses[wire.CmdInv] = deadline
 
+	case wire.CmdGetUBlocks:
+		// Expects an inv message.
+		pendingResponses[wire.CmdInv] = deadline
+
 	case wire.CmdGetData:
 		// Expects a block, merkleblock, tx, or notfound message.
 		pendingResponses[wire.CmdBlock] = deadline
@@ -1672,6 +1676,13 @@ out:
 					invMsg.AddInvVect(iv)
 					waiting = queuePacket(outMsg{msg: invMsg},
 						pendingMsgs, waiting)
+				} else if iv.Type == wire.InvTypeUBlock ||
+					iv.Type == wire.InvTypeWitnessUBlock {
+					invMsg := wire.NewMsgInvSizeHint(1)
+					invMsg.AddInvVect(iv)
+					waiting = queuePacket(outMsg{msg: invMsg},
+						pendingMsgs, waiting)
+
 				} else {
 					invSendQueue.PushBack(iv)
 				}
@@ -1887,8 +1898,6 @@ func (p *Peer) QueueMessageWithEncoding(msg wire.Message, doneChan chan<- struct
 			}()
 		}
 		return
-	}
-	if msg.Command() == "inv" {
 	}
 	p.outputQueue <- outMsg{msg: msg, encoding: encoding, doneChan: doneChan}
 }
