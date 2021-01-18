@@ -88,19 +88,22 @@ const (
 	SFNode2X
 
 	SFNodeUtreexo
+
+	SFNodeUtreexoCSN
 )
 
 // Map of service flags back to their constant names for pretty printing.
 var sfStrings = map[ServiceFlag]string{
-	SFNodeNetwork: "SFNodeNetwork",
-	SFNodeGetUTXO: "SFNodeGetUTXO",
-	SFNodeBloom:   "SFNodeBloom",
-	SFNodeWitness: "SFNodeWitness",
-	SFNodeXthin:   "SFNodeXthin",
-	SFNodeBit5:    "SFNodeBit5",
-	SFNodeCF:      "SFNodeCF",
-	SFNode2X:      "SFNode2X",
-	SFNodeUtreexo: "SFNodeUtreexo",
+	SFNodeNetwork:    "SFNodeNetwork",
+	SFNodeGetUTXO:    "SFNodeGetUTXO",
+	SFNodeBloom:      "SFNodeBloom",
+	SFNodeWitness:    "SFNodeWitness",
+	SFNodeXthin:      "SFNodeXthin",
+	SFNodeBit5:       "SFNodeBit5",
+	SFNodeCF:         "SFNodeCF",
+	SFNode2X:         "SFNode2X",
+	SFNodeUtreexo:    "SFNodeUtreexo",
+	SFNodeUtreexoCSN: "SFNodeUtreexoCSN",
 }
 
 // orderedSFStrings is an ordered list of service flags from highest to
@@ -115,6 +118,7 @@ var orderedSFStrings = []ServiceFlag{
 	SFNodeCF,
 	SFNode2X,
 	SFNodeUtreexo,
+	SFNodeUtreexoCSN,
 }
 
 // String returns the ServiceFlag in human-readable form.

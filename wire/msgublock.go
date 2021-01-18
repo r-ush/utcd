@@ -79,5 +79,14 @@ func (msg *MsgUBlock) MaxPayloadLength(pver uint32) uint32 {
 	// Block header at 80 bytes + transaction count + max transactions
 	// which can vary up to the MaxBlockPayload (including the block header
 	// and transaction count).
-	return MaxBlockPayload
+	return MaxBlockPayload + 4000000
+}
+
+// NewMsgUBlock returns a new bitcoin block message that conforms to the
+// Message interface.  See MsgUBlock for details.
+func NewMsgUBlock(msgBlock MsgBlock, udata btcacc.UData) *MsgUBlock {
+	return &MsgUBlock{
+		MsgBlock:    msgBlock,
+		UtreexoData: udata,
+	}
 }

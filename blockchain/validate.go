@@ -1317,6 +1317,15 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 	//if err != nil {
 	//	return err
 	//}
+
+	// Check that the ublock txOuts are valid
+	err := b.utreexoViewpoint.Modify(ublock)
+	if err != nil {
+		return err
+	}
+
+	// convert to utxoview for backwards compat
+	// TODO: using the ublock directly would be better instead of this conversion
 	view.UBlockToUtxoView(*ublock)
 
 	// BIP0016 describes a pay-to-script-hash type that is considered a
