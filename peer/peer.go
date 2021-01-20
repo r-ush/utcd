@@ -1488,6 +1488,7 @@ out:
 			if p.cfg.Listeners.OnBlock != nil {
 				p.cfg.Listeners.OnBlock(p, msg, buf)
 			}
+
 		case *wire.MsgUBlock:
 			if p.cfg.Listeners.OnUBlock != nil {
 				p.cfg.Listeners.OnUBlock(p, msg, buf)
