@@ -253,10 +253,14 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 	opcode := op.value
 	dataLen := len(data)
 
+	// adiabat:  Why bother returning  anything if you just panic instead?
+	// I'm commenting out the panics as they prevent the errors from actually
+	// getting returned
+
 	if dataLen == 0 && op.value != OP_0 {
 		str := fmt.Sprintf("zero length data push is encoded with "+
 			"opcode %s instead of OP_0", op.name)
-		panic(str)
+		// panic(str)
 		return scriptError(ErrMinimalData, str)
 	} else if dataLen == 1 && data[0] >= 1 && data[0] <= 16 {
 		if opcode != OP_1+data[0]-1 {
@@ -264,7 +268,7 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 			str := fmt.Sprintf("data push of the value %d encoded "+
 				"with opcode %s instead of OP_%d", data[0],
 				op.name, data[0])
-			panic(str)
+			// panic(str)
 			return scriptError(ErrMinimalData, str)
 		}
 	} else if dataLen == 1 && data[0] == 0x81 {
@@ -272,7 +276,7 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 			str := fmt.Sprintf("data push of the value -1 encoded "+
 				"with opcode %s instead of OP_1NEGATE",
 				op.name)
-			panic(str)
+			// panic(str)
 			return scriptError(ErrMinimalData, str)
 		}
 	} else if dataLen <= 75 {
@@ -281,7 +285,7 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 			str := fmt.Sprintf("data push of %d bytes encoded "+
 				"with opcode %s instead of OP_DATA_%d", dataLen,
 				op.name, dataLen)
-			panic(str)
+			// panic(str)
 			return scriptError(ErrMinimalData, str)
 		}
 	} else if dataLen <= 255 {
@@ -289,7 +293,7 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 			str := fmt.Sprintf("data push of %d bytes encoded "+
 				"with opcode %s instead of OP_PUSHDATA1",
 				dataLen, op.name)
-			panic(str)
+			// panic(str)
 			return scriptError(ErrMinimalData, str)
 		}
 	} else if dataLen <= 65535 {
@@ -297,7 +301,7 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 			str := fmt.Sprintf("data push of %d bytes encoded "+
 				"with opcode %s instead of OP_PUSHDATA2",
 				dataLen, op.name)
-			panic(str)
+			// panic(str)
 			return scriptError(ErrMinimalData, str)
 		}
 	}
@@ -363,14 +367,14 @@ func (vm *Engine) executeOpcode(op *opcode, data []byte) error {
 	// Disabled opcodes are fail on program counter.
 	if isOpcodeDisabled(op.value) {
 		str := fmt.Sprintf("attempt to execute disabled opcode %s", op.name)
-		panic(str)
+		// panic(str)
 		return scriptError(ErrDisabledOpcode, str)
 	}
 
 	// Always-illegal opcodes are fail on program counter.
 	if isOpcodeAlwaysIllegal(op.value) {
 		str := fmt.Sprintf("attempt to execute reserved opcode %s", op.name)
-		panic(str)
+		// panic(str)
 		return scriptError(ErrReservedOpcode, str)
 	}
 
@@ -380,13 +384,13 @@ func (vm *Engine) executeOpcode(op *opcode, data []byte) error {
 		if vm.numOps > MaxOpsPerScript {
 			str := fmt.Sprintf("exceeded max operation limit of %d",
 				MaxOpsPerScript)
-			panic(str)
+			// panic(str)
 			return scriptError(ErrTooManyOperations, str)
 		}
 	} else if len(data) > MaxScriptElementSize {
 		str := fmt.Sprintf("element size %d exceeds max allowed size %d",
 			len(data), MaxScriptElementSize)
-		panic(str)
+		// panic(str)
 		return scriptError(ErrElementTooBig, str)
 	}
 
@@ -843,7 +847,7 @@ func (vm *Engine) Step() (done bool, err error) {
 
 		str := fmt.Sprintf("attempt to step beyond script index %d (bytes %x)",
 			vm.scriptIdx, vm.scripts[vm.scriptIdx])
-		panic(str)
+		// panic(str)
 		return true, scriptError(ErrInvalidProgramCounter, str)
 	}
 
@@ -953,15 +957,18 @@ func (vm *Engine) Execute() (err error) {
 		log.Tracef("%v", newLogClosure(func() string {
 			dis, err := vm.DisasmPC()
 			if err != nil {
-				panic(err)
+				// panic(err)
 				return fmt.Sprintf("stepping (%v)", err)
 			}
 			return fmt.Sprintf("stepping %v", dis)
 		}))
 
+		// adiabat: again, why panic and then return an error..?
+		// this seems to cause tests to fail because if you give an invalid tx
+		// and expect it to return an error, it won't
 		done, err = vm.Step()
 		if err != nil {
-			panic(err)
+			// panic(err)
 			return err
 		}
 		log.Tracef("%v", newLogClosure(func() string {

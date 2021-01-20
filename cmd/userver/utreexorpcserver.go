@@ -4472,7 +4472,7 @@ func (s *rpcServer) handleBlockchainNotification(notification *blockchain.Notifi
 			block, ok = notification.Data.(*btcutil.Block)
 		}
 
-		block, ok := notification.Data.(*btcutil.Block)
+		block, ok = notification.Data.(*btcutil.Block)
 		if !ok {
 			rpcsLog.Warnf("Chain connected notification is not a block.")
 			break
