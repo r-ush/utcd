@@ -460,9 +460,10 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 	// Reject outbound peers that are not full nodes.
 	wantServices := wire.SFNodeNetwork
 
-	//if sp.server.services&wire.SFNodeUtreexo == wire.SFNodeUtreexo {
-	//	wantServices &^= wire.SFNodeUtreexo
-	//}
+	// Add utreexo bridgenode if we're a utreexoCSN
+	if sp.server.services&wire.SFNodeUtreexoCSN == wire.SFNodeUtreexoCSN {
+		wantServices |= wire.SFNodeUtreexo
+	}
 	if !isInbound && !hasServices(msg.Services, wantServices) {
 		missingServices := wantServices & ^msg.Services
 		srvrLog.Debugf("Rejecting peer %s with services %v due to not "+
@@ -1975,14 +1976,18 @@ func (s *server) handleRelayInvMsg(state *peerState, msg relayMsg) {
 			return
 		}
 
+		// don't relay regular blocks to utreexoCSNs
+		if msg.invVect.Type == wire.InvTypeBlock &&
+			sp.wantsOnlyUBlocks() {
+			return
+		}
+
 		// If the inventory is a block and the peer prefers headers,
 		// generate and send a headers message instead of an inventory
 		// message.
 		if msg.invVect.Type == wire.InvTypeBlock &&
 			sp.WantsHeaders() {
-			if sp.wantsOnlyUBlocks() {
-				return
-			}
+
 			blockHeader, ok := msg.data.(wire.BlockHeader)
 			if !ok {
 				peerLog.Warnf("Underlying data for headers" +
@@ -2030,9 +2035,6 @@ func (s *server) handleRelayInvMsg(state *peerState, msg relayMsg) {
 			}
 		}
 
-		if sp.wantsOnlyUBlocks() {
-			return
-		}
 		// Queue the inventory to be relayed with the next batch.
 		// It will be ignored if the peer is already known to
 		// have the inventory.
