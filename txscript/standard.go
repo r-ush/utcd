@@ -146,10 +146,7 @@ func extractUncompressedPubKey(script []byte) []byte {
 
 		return script[1:66]
 	}
-	//fmt.Println("len(script) == 67", len(script) == 67)
-	//fmt.Println("script[66] == OP_CHECKSIG", script[66] == OP_CHECKSIG)
-	//fmt.Println("script[0] == OP_DATA_65", script[0] == OP_DATA_65)
-	//fmt.Println("script[1] == 0x04", script[1] == 0x04, script[1])
+
 	return nil
 }
 
@@ -274,7 +271,7 @@ func extractMultisigScriptDetails(script []byte, extractPubKeys bool) multiSigDe
 	}
 	for tokenizer.Next() {
 		data := tokenizer.Data()
-		if !isStrictPubKeyEncoding(data) {
+		if !isPubKeyEncoding(data) {
 			break
 		}
 		numPubKeys++
@@ -510,10 +507,18 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 	//if err != nil {
 	//	return nil, err
 	//}
+	var numInputs int
+	tokenizer := MakeScriptTokenizer(sigScript)
+	for tokenizer.Next() {
+		numInputs++
+	}
+	if err := tokenizer.Err(); err != nil {
+		return nil, err
+	}
 
-	// Push only sigScript makes little sense.
-	si := new(ScriptInfo)
-	si.PkScriptClass = typeOfScript(pkScript)
+	if err := checkScriptParses(pkScript); err != nil {
+		return nil, err
+	}
 
 	// Can't have a signature script that doesn't just push data.
 	if !IsPushOnlyScript(sigScript) {
@@ -521,7 +526,25 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 			"signature script is not push only")
 	}
 
+	si := new(ScriptInfo)
+	si.PkScriptClass = typeOfScript(pkScript)
+
 	si.ExpectedInputs = expectedInputs(pkScript, si.PkScriptClass)
+
+	// All entries pushed to stack (or are OP_RESERVED and exec will fail).
+	si.NumInputs = numInputs
+
+	//// Push only sigScript makes little sense.
+	//si := new(ScriptInfo)
+	//si.PkScriptClass = typeOfScript(pkScript)
+
+	//// Can't have a signature script that doesn't just push data.
+	//if !IsPushOnlyScript(sigScript) {
+	//	return nil, scriptError(ErrNotPushOnly,
+	//		"signature script is not push only")
+	//}
+
+	//si.ExpectedInputs = expectedInputs(pkScript, si.PkScriptClass)
 
 	switch {
 	// Count sigops taking into account pay-to-script-hash.
@@ -541,11 +564,11 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 		} else {
 			si.ExpectedInputs += shInputs
 		}
-		si.SigOps = GetSigOpCount(script)
+		si.SigOps = countSigOps(script, true)
 
 		// All entries pushed to stack (or are OP_RESERVED and exec
 		// will fail).
-		si.NumInputs = len(sigScript)
+		//si.NumInputs = len(sigScript)
 
 	// If segwit is active, and this is a regular p2wkh output, then we'll
 	// treat the script as a p2pkh output in essence.
@@ -571,8 +594,8 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 
 		si.SigOps = GetWitnessSigOpCount(sigScript, pkScript, witness)
 
-		si.NumInputs = len(witness)
-		si.NumInputs += len(sigScript)
+		si.NumInputs += len(witness)
+		//si.NumInputs += len(sigScript)
 
 	// If segwit is active, and this is a p2wsh output, then we'll need to
 	// examine the witness script to generate accurate script info.
@@ -593,11 +616,11 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 		si.NumInputs = len(witness)
 
 	default:
-		si.SigOps = GetSigOpCount(pkScript)
+		si.SigOps = countSigOps(pkScript, true)
 
 		// All entries pushed to stack (or are OP_RESERVED and exec
 		// will fail).
-		si.NumInputs = len(sigScript)
+		//si.NumInputs = len(sigScript)
 	}
 
 	return si, nil

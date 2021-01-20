@@ -71,6 +71,7 @@ func isSmallIntNew(op byte) bool {
 	if op == OP_0 || (op >= OP_1 && op <= OP_16) {
 		return true
 	}
+
 	return false
 }
 

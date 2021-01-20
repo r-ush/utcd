@@ -217,7 +217,7 @@ func computeNonWitnessPkScript(sigScript []byte) (PkScript, error) {
 		//}
 		//redeemScript := parsedOpcodes[len(parsedOpcodes)-1].data
 
-		redeemScript := ExtractScriptHash(sigScript)
+		redeemScript := finalOpcodeData(sigScript)
 		scriptHash := hash160(redeemScript)
 		script, err := payToScriptHashScript(scriptHash)
 		if err != nil {

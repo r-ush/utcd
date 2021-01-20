@@ -992,14 +992,14 @@ func (vm *Engine) subScript() []byte {
 	return vm.scripts[vm.scriptIdx][vm.lastCodeSep:]
 }
 
-// isStrictPubKeyEncoding returns whether or not the passed public key adheres
+// isPubKeyEncoding returns whether or not the passed public key adheres
 // to the strict encoding requirements.
-func isStrictPubKeyEncoding(pubKey []byte) bool {
-	if len(pubKey) == 33 && (pubKey[0] == 0x02 || pubKey[0] == 0x03) {
+func isPubKeyEncoding(pubKey []byte) bool {
+	if len(pubKey) == 33 { //&& (pubKey[0] == 0x02 || pubKey[0] == 0x03) {
 		// Compressed
 		return true
 	}
-	if len(pubKey) == 65 && pubKey[0] == 0x04 {
+	if len(pubKey) == 65 { //&& pubKey[0] == 0x04 {
 		// Compressed
 		// Uncompressed
 		return true
@@ -1540,70 +1540,77 @@ func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags
 		vm.astack.verifyMinimalData = true
 	}
 
+	// FIXME kcalvinalvin: I know I'm not handling this part right
+	// Check to see if we should execute in witness verification mode
+	// according to the set flags. We check both the pkScript, and sigScript
+	// here since in the case of nested p2sh, the scriptSig will be a valid
+	// witness program. For nested p2sh, all the bytes after the first data
+	// push should *exactly* match the witness program template.
+	if vm.hasFlag(ScriptVerifyWitness) {
+		// If witness evaluation is enabled, then P2SH MUST also be
+		// active.
+		if !vm.hasFlag(ScriptBip16) {
+			errStr := "P2SH must be enabled to do witness verification"
+			return nil, scriptError(ErrInvalidFlags, errStr)
+		}
+
+		var witProgram []byte
+
+		switch {
+		// FIXME idk going to bed. This is wrong since script used to be
+		// a parsed script not a byte slice
+		case isWitnessProgram(vm.scripts[1]):
+			// The scriptSig must be *empty* for all native witness
+			// programs, otherwise we introduce malleability.
+			if len(scriptSig) != 0 {
+				errStr := "native witness program cannot " +
+					"also have a signature script"
+				return nil, scriptError(ErrWitnessMalleated, errStr)
+			}
+
+			witProgram = scriptPubKey
+		case len(tx.TxIn[txIdx].Witness) != 0 && vm.bip16:
+			// The sigScript MUST be *exactly* a single canonical
+			// data push of the witness program, otherwise we
+			// reintroduce malleability.
+			// FIXME idk going to bed. This is clearly wrong since scripts
+			// used to be parsedScript
+			sigPops := vm.scripts[0]
+			data := ExtractWitnessV0ScriptHash(vm.scripts[0])
+			op := vm.scripts[0][0]
+			if len(sigPops) == 1 && isCanonicalPush(op, data) &&
+				IsWitnessProgram(data) {
+
+				witProgram = data
+			} else {
+				errStr := "signature script for witness " +
+					"nested p2sh is not canonical"
+				return nil, scriptError(ErrWitnessMalleatedP2SH, errStr)
+			}
+		}
+
+		if witProgram != nil {
+			var err error
+			vm.witnessVersion, vm.witnessProgram, err = ExtractWitnessProgramInfo(witProgram)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// If we didn't find a witness program in either the
+			// pkScript or as a datapush within the sigScript, then
+			// there MUST NOT be any witness data associated with
+			// the input being validated.
+			if vm.witnessProgram == nil && len(tx.TxIn[txIdx].Witness) != 0 {
+				errStr := "non-witness inputs cannot have a witness"
+				return nil, scriptError(ErrWitnessUnexpected, errStr)
+			}
+		}
+
+	}
+
 	// Setup the current tokenizer used to parse through the script one opcode
 	// at a time with the script associated with the program counter.
 	vm.tokenizer = MakeScriptTokenizer(scripts[vm.scriptIdx])
-
-	//// Check to see if we should execute in witness verification mode
-	//// according to the set flags. We check both the pkScript, and sigScript
-	//// here since in the case of nested p2sh, the scriptSig will be a valid
-	//// witness program. For nested p2sh, all the bytes after the first data
-	//// push should *exactly* match the witness program template.
-	//if vm.hasFlag(ScriptVerifyWitness) {
-	//	// If witness evaluation is enabled, then P2SH MUST also be
-	//	// active.
-	//	if !vm.hasFlag(ScriptBip16) {
-	//		errStr := "P2SH must be enabled to do witness verification"
-	//		return nil, scriptError(ErrInvalidFlags, errStr)
-	//	}
-
-	//	var witProgram []byte
-
-	//	switch {
-	//	case isWitnessProgram(vm.scripts[1]):
-	//		// The scriptSig must be *empty* for all native witness
-	//		// programs, otherwise we introduce malleability.
-	//		if len(scriptSig) != 0 {
-	//			errStr := "native witness program cannot " +
-	//				"also have a signature script"
-	//			return nil, scriptError(ErrWitnessMalleated, errStr)
-	//		}
-
-	//		witProgram = scriptPubKey
-	//	case len(tx.TxIn[txIdx].Witness) != 0 && vm.bip16:
-	//		// The sigScript MUST be *exactly* a single canonical
-	//		// data push of the witness program, otherwise we
-	//		// reintroduce malleability.
-	//		sigPops := vm.scripts[0]
-	//		if len(sigPops) == 1 && canonicalPush(sigPops[0]) &&
-	//			IsWitnessProgram(sigPops[0].data) {
-
-	//			witProgram = sigPops[0].data
-	//		} else {
-	//			errStr := "signature script for witness " +
-	//				"nested p2sh is not canonical"
-	//			return nil, scriptError(ErrWitnessMalleatedP2SH, errStr)
-	//		}
-	//	}
-
-	//	if witProgram != nil {
-	//		var err error
-	//		vm.witnessVersion, vm.witnessProgram, err = ExtractWitnessProgramInfo(witProgram)
-	//		if err != nil {
-	//			return nil, err
-	//		}
-	//	} else {
-	//		// If we didn't find a witness program in either the
-	//		// pkScript or as a datapush within the sigScript, then
-	//		// there MUST NOT be any witness data associated with
-	//		// the input being validated.
-	//		if vm.witnessProgram == nil && len(tx.TxIn[txIdx].Witness) != 0 {
-	//			errStr := "non-witness inputs cannot have a witness"
-	//			return nil, scriptError(ErrWitnessUnexpected, errStr)
-	//		}
-	//	}
-
-	//}
 
 	vm.tx = *tx
 	vm.txIdx = txIdx
