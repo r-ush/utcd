@@ -169,6 +169,8 @@ type Engine struct {
 	// the current program counter.  Note that it differs from the actual byte
 	// index into the script and is really only used for disassembly purposes.
 	//
+	// rawscriptIdx is meant to save the raw byte index for OP_CODESEPARATOR
+	//
 	// lastCodeSep specifies the position within the current script of the last
 	// OP_CODESEPARATOR.
 	//
@@ -189,6 +191,7 @@ type Engine struct {
 	scripts         [][]byte
 	scriptIdx       int
 	opcodeIdx       int
+	rawscriptIdx    int
 	lastCodeSep     int
 	tokenizer       ScriptTokenizer
 	savedFirstStack [][]byte
@@ -1191,6 +1194,7 @@ func (vm *Engine) CheckErrorCondition(finalScript bool) error {
 func (vm *Engine) Step() (done bool, err error) {
 	// Verify the engine is pointing to a valid program counter.
 	if err := vm.checkValidPC(); err != nil {
+		//panic(err)
 		return true, err
 	}
 
@@ -1202,20 +1206,25 @@ func (vm *Engine) Step() (done bool, err error) {
 		// assumption or new script versions are introduced with different
 		// semantics.
 		if err := vm.tokenizer.Err(); err != nil {
+			//panic(err)
 			return false, err
 		}
 
 		str := fmt.Sprintf("attempt to step beyond script index %d (bytes %x)",
 			vm.scriptIdx, vm.scripts[vm.scriptIdx])
+		//panic("heasdfre")
 		return true, scriptError(ErrInvalidProgramCounter, str)
 	}
 	vm.opcodeIdx++
 
+	// Just for saving the byte index for OP_CODESEPARATOR
+	vm.rawscriptIdx = int(vm.tokenizer.ByteIndex())
 	// Execute the opcode while taking into account several things such as
 	// disabled opcodes, illegal opcodes, maximum allowed operations per script,
 	// maximum script element sizes, and conditionals.
 	err = vm.executeOpcode(vm.tokenizer.op, vm.tokenizer.Data())
 	if err != nil {
+		//panic(err)
 		return true, err
 	}
 
@@ -1258,6 +1267,7 @@ func (vm *Engine) Step() (done bool, err error) {
 			// Check script ran successfully.
 			err := vm.CheckErrorCondition(false)
 			if err != nil {
+				//panic(err)
 				return false, err
 			}
 
@@ -1265,6 +1275,7 @@ func (vm *Engine) Step() (done bool, err error) {
 			// parses.
 			script := vm.savedFirstStack[len(vm.savedFirstStack)-1]
 			if err := checkScriptParses(script); err != nil {
+				//panic(err)
 				return false, err
 			}
 			vm.scripts = append(vm.scripts, script)
@@ -1280,6 +1291,7 @@ func (vm *Engine) Step() (done bool, err error) {
 
 			witness := vm.tx.TxIn[vm.txIdx].Witness
 			if err := vm.verifyWitnessProgram(witness); err != nil {
+				//panic(err)
 				return false, err
 			}
 
@@ -1322,6 +1334,7 @@ func (vm *Engine) Execute() (err error) {
 
 		done, err = vm.Step()
 		if err != nil {
+			//panic(err)
 			return err
 		}
 		log.Tracef("%v", newLogClosure(func() string {

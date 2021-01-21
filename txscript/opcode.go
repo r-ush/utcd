@@ -931,7 +931,6 @@ func opcodeFalse(op *opcode, data []byte, vm *Engine) error {
 // opcodePushData is a common handler for the vast majority of opcodes that push
 // raw data (bytes) to the data stack.
 func opcodePushData(op *opcode, data []byte, vm *Engine) error {
-	fmt.Printf("PUSH data: %x\n", data)
 	vm.dstack.PushByteArray(data)
 	return nil
 }
@@ -2144,7 +2143,7 @@ func opcodeHash256(op *opcode, data []byte, vm *Engine) error {
 //
 // This opcode does not change the contents of the data stack.
 func opcodeCodeSeparator(op *opcode, data []byte, vm *Engine) error {
-	vm.lastCodeSep = vm.opcodeIdx
+	vm.lastCodeSep = vm.rawscriptIdx
 	return nil
 }
 
@@ -2165,11 +2164,13 @@ func opcodeCodeSeparator(op *opcode, data []byte, vm *Engine) error {
 func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 	pkBytes, err := vm.dstack.PopByteArray()
 	if err != nil {
+		//panic(err)
 		return err
 	}
 
 	fullSigBytes, err := vm.dstack.PopByteArray()
 	if err != nil {
+		//panic(err)
 		return err
 	}
 
@@ -2178,6 +2179,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 	// checked depending on the script flags and upon parsing the signature.
 	if len(fullSigBytes) < 1 {
 		vm.dstack.PushBool(false)
+		//panic(err)
 		return nil
 	}
 
@@ -2196,15 +2198,17 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 	hashType := SigHashType(fullSigBytes[len(fullSigBytes)-1])
 	sigBytes := fullSigBytes[:len(fullSigBytes)-1]
 	if err := vm.checkHashTypeEncoding(hashType); err != nil {
+		//panic(err)
 		return err
 	}
 	if err := vm.checkSignatureEncoding(sigBytes); err != nil {
+		//panic(err)
 		return err
 	}
 	if err := vm.checkPubKeyEncoding(pkBytes); err != nil {
+		//panic(err)
 		return err
 	}
-	fmt.Println("pkBytes", pkBytes)
 
 	// Get script starting from the most recent OP_CODESEPARATOR.
 	subScript := vm.subScript()
@@ -2234,6 +2238,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 
 	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
 	if err != nil {
+		//panic(err)
 		vm.dstack.PushBool(false)
 		return nil
 	}
@@ -2247,6 +2252,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		signature, err = btcec.ParseSignature(sigBytes, btcec.S256())
 	}
 	if err != nil {
+		//panic(err)
 		vm.dstack.PushBool(false)
 		return nil
 	}
