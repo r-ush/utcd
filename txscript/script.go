@@ -572,31 +572,31 @@ func removeOpcode(script []byte, opcode byte) []byte {
 	return result
 }
 
-// canonicalPush returns true if the object is either not a push instruction
-// or the push instruction contained wherein is matches the canonical form
-// or using the smallest instruction to do the job. False otherwise.
-func canonicalPush(pop parsedOpcode) bool {
-	opcode := pop.opcode.value
-	data := pop.data
-	dataLen := len(pop.data)
-	if opcode > OP_16 {
-		return true
-	}
-
-	if opcode < OP_PUSHDATA1 && opcode > OP_0 && (dataLen == 1 && data[0] <= 16) {
-		return false
-	}
-	if opcode == OP_PUSHDATA1 && dataLen < OP_PUSHDATA1 {
-		return false
-	}
-	if opcode == OP_PUSHDATA2 && dataLen <= 0xff {
-		return false
-	}
-	if opcode == OP_PUSHDATA4 && dataLen <= 0xffff {
-		return false
-	}
-	return true
-}
+//// canonicalPush returns true if the object is either not a push instruction
+//// or the push instruction contained wherein is matches the canonical form
+//// or using the smallest instruction to do the job. False otherwise.
+//func canonicalPush(pop parsedOpcode) bool {
+//	opcode := pop.opcode.value
+//	data := pop.data
+//	dataLen := len(pop.data)
+//	if opcode > OP_16 {
+//		return true
+//	}
+//
+//	if opcode < OP_PUSHDATA1 && opcode > OP_0 && (dataLen == 1 && data[0] <= 16) {
+//		return false
+//	}
+//	if opcode == OP_PUSHDATA1 && dataLen < OP_PUSHDATA1 {
+//		return false
+//	}
+//	if opcode == OP_PUSHDATA2 && dataLen <= 0xff {
+//		return false
+//	}
+//	if opcode == OP_PUSHDATA4 && dataLen <= 0xffff {
+//		return false
+//	}
+//	return true
+//}
 
 // isCanonicalPush returns true if the opcode is either not a push instruction
 // or the data associated with the push instruction uses the smallest
@@ -804,6 +804,7 @@ func calcWitnessSignatureHash(subScript []byte, sigHashes *TxSigHashes,
 	binary.LittleEndian.PutUint32(bIndex[:], txIn.PreviousOutPoint.Index)
 	sigHash.Write(bIndex[:])
 
+	//fmt.Printf("subscript %x\n", subScript)
 	if isWitnessPubKeyHashNew(subScript) {
 		tokenizer := MakeScriptTokenizer(subScript)
 		tokenizer.Next()

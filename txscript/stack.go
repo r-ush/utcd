@@ -96,7 +96,6 @@ func (s *stack) PopInt() (scriptNum, error) {
 func (s *stack) PopBool() (bool, error) {
 	so, err := s.PopByteArray()
 	if err != nil {
-		panic(err)
 		return false, err
 	}
 

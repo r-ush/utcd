@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"hash"
@@ -660,234 +659,234 @@ func disasmOpcode(buf *strings.Builder, op *opcode, data []byte, compact bool) {
 	buf.WriteString(fmt.Sprintf(" 0x%02x", data))
 }
 
-// parsedOpcode represents an opcode that has been parsed and includes any
-// potential data associated with it.
-type parsedOpcode struct {
-	opcode *opcode
-	data   []byte
-}
+//// parsedOpcode represents an opcode that has been parsed and includes any
+//// potential data associated with it.
+//type parsedOpcode struct {
+//	opcode *opcode
+//	data   []byte
+//}
+//
+//// isDisabled returns whether or not the opcode is disabled and thus is always
+//// bad to see in the instruction stream (even if turned off by a conditional).
+//func (pop *parsedOpcode) isDisabled() bool {
+//	switch pop.opcode.value {
+//	case OP_CAT:
+//		return true
+//	case OP_SUBSTR:
+//		return true
+//	case OP_LEFT:
+//		return true
+//	case OP_RIGHT:
+//		return true
+//	case OP_INVERT:
+//		return true
+//	case OP_AND:
+//		return true
+//	case OP_OR:
+//		return true
+//	case OP_XOR:
+//		return true
+//	case OP_2MUL:
+//		return true
+//	case OP_2DIV:
+//		return true
+//	case OP_MUL:
+//		return true
+//	case OP_DIV:
+//		return true
+//	case OP_MOD:
+//		return true
+//	case OP_LSHIFT:
+//		return true
+//	case OP_RSHIFT:
+//		return true
+//	default:
+//		return false
+//	}
+//}
+//
+//// alwaysIllegal returns whether or not the opcode is always illegal when passed
+//// over by the program counter even if in a non-executed branch (it isn't a
+//// coincidence that they are conditionals).
+//func (pop *parsedOpcode) alwaysIllegal() bool {
+//	switch pop.opcode.value {
+//	case OP_VERIF:
+//		return true
+//	case OP_VERNOTIF:
+//		return true
+//	default:
+//		return false
+//	}
+//}
+//
+//// isConditional returns whether or not the opcode is a conditional opcode which
+//// changes the conditional execution stack when executed.
+//func (pop *parsedOpcode) isConditional() bool {
+//	switch pop.opcode.value {
+//	case OP_IF:
+//		return true
+//	case OP_NOTIF:
+//		return true
+//	case OP_ELSE:
+//		return true
+//	case OP_ENDIF:
+//		return true
+//	default:
+//		return false
+//	}
+//}
 
-// isDisabled returns whether or not the opcode is disabled and thus is always
-// bad to see in the instruction stream (even if turned off by a conditional).
-func (pop *parsedOpcode) isDisabled() bool {
-	switch pop.opcode.value {
-	case OP_CAT:
-		return true
-	case OP_SUBSTR:
-		return true
-	case OP_LEFT:
-		return true
-	case OP_RIGHT:
-		return true
-	case OP_INVERT:
-		return true
-	case OP_AND:
-		return true
-	case OP_OR:
-		return true
-	case OP_XOR:
-		return true
-	case OP_2MUL:
-		return true
-	case OP_2DIV:
-		return true
-	case OP_MUL:
-		return true
-	case OP_DIV:
-		return true
-	case OP_MOD:
-		return true
-	case OP_LSHIFT:
-		return true
-	case OP_RSHIFT:
-		return true
-	default:
-		return false
-	}
-}
+//// checkMinimalDataPush returns whether or not the current data push uses the
+//// smallest possible opcode to represent it.  For example, the value 15 could
+//// be pushed with OP_DATA_1 15 (among other variations); however, OP_15 is a
+//// single opcode that represents the same value and is only a single byte versus
+//// two bytes.
+//func (pop *parsedOpcode) checkMinimalDataPush() error {
+//	data := pop.data
+//	dataLen := len(data)
+//	opcode := pop.opcode.value
+//
+//	if dataLen == 0 && opcode != OP_0 {
+//		str := fmt.Sprintf("zero length data push is encoded with "+
+//			"opcode %s instead of OP_0", pop.opcode.name)
+//		return scriptError(ErrMinimalData, str)
+//	} else if dataLen == 1 && data[0] >= 1 && data[0] <= 16 {
+//		if opcode != OP_1+data[0]-1 {
+//			// Should have used OP_1 .. OP_16
+//			str := fmt.Sprintf("data push of the value %d encoded "+
+//				"with opcode %s instead of OP_%d", data[0],
+//				pop.opcode.name, data[0])
+//			return scriptError(ErrMinimalData, str)
+//		}
+//	} else if dataLen == 1 && data[0] == 0x81 {
+//		if opcode != OP_1NEGATE {
+//			str := fmt.Sprintf("data push of the value -1 encoded "+
+//				"with opcode %s instead of OP_1NEGATE",
+//				pop.opcode.name)
+//			return scriptError(ErrMinimalData, str)
+//		}
+//	} else if dataLen <= 75 {
+//		if int(opcode) != dataLen {
+//			// Should have used a direct push
+//			str := fmt.Sprintf("data push of %d bytes encoded "+
+//				"with opcode %s instead of OP_DATA_%d", dataLen,
+//				pop.opcode.name, dataLen)
+//			return scriptError(ErrMinimalData, str)
+//		}
+//	} else if dataLen <= 255 {
+//		if opcode != OP_PUSHDATA1 {
+//			str := fmt.Sprintf("data push of %d bytes encoded "+
+//				"with opcode %s instead of OP_PUSHDATA1",
+//				dataLen, pop.opcode.name)
+//			return scriptError(ErrMinimalData, str)
+//		}
+//	} else if dataLen <= 65535 {
+//		if opcode != OP_PUSHDATA2 {
+//			str := fmt.Sprintf("data push of %d bytes encoded "+
+//				"with opcode %s instead of OP_PUSHDATA2",
+//				dataLen, pop.opcode.name)
+//			return scriptError(ErrMinimalData, str)
+//		}
+//	}
+//	return nil
+//}
 
-// alwaysIllegal returns whether or not the opcode is always illegal when passed
-// over by the program counter even if in a non-executed branch (it isn't a
-// coincidence that they are conditionals).
-func (pop *parsedOpcode) alwaysIllegal() bool {
-	switch pop.opcode.value {
-	case OP_VERIF:
-		return true
-	case OP_VERNOTIF:
-		return true
-	default:
-		return false
-	}
-}
-
-// isConditional returns whether or not the opcode is a conditional opcode which
-// changes the conditional execution stack when executed.
-func (pop *parsedOpcode) isConditional() bool {
-	switch pop.opcode.value {
-	case OP_IF:
-		return true
-	case OP_NOTIF:
-		return true
-	case OP_ELSE:
-		return true
-	case OP_ENDIF:
-		return true
-	default:
-		return false
-	}
-}
-
-// checkMinimalDataPush returns whether or not the current data push uses the
-// smallest possible opcode to represent it.  For example, the value 15 could
-// be pushed with OP_DATA_1 15 (among other variations); however, OP_15 is a
-// single opcode that represents the same value and is only a single byte versus
-// two bytes.
-func (pop *parsedOpcode) checkMinimalDataPush() error {
-	data := pop.data
-	dataLen := len(data)
-	opcode := pop.opcode.value
-
-	if dataLen == 0 && opcode != OP_0 {
-		str := fmt.Sprintf("zero length data push is encoded with "+
-			"opcode %s instead of OP_0", pop.opcode.name)
-		return scriptError(ErrMinimalData, str)
-	} else if dataLen == 1 && data[0] >= 1 && data[0] <= 16 {
-		if opcode != OP_1+data[0]-1 {
-			// Should have used OP_1 .. OP_16
-			str := fmt.Sprintf("data push of the value %d encoded "+
-				"with opcode %s instead of OP_%d", data[0],
-				pop.opcode.name, data[0])
-			return scriptError(ErrMinimalData, str)
-		}
-	} else if dataLen == 1 && data[0] == 0x81 {
-		if opcode != OP_1NEGATE {
-			str := fmt.Sprintf("data push of the value -1 encoded "+
-				"with opcode %s instead of OP_1NEGATE",
-				pop.opcode.name)
-			return scriptError(ErrMinimalData, str)
-		}
-	} else if dataLen <= 75 {
-		if int(opcode) != dataLen {
-			// Should have used a direct push
-			str := fmt.Sprintf("data push of %d bytes encoded "+
-				"with opcode %s instead of OP_DATA_%d", dataLen,
-				pop.opcode.name, dataLen)
-			return scriptError(ErrMinimalData, str)
-		}
-	} else if dataLen <= 255 {
-		if opcode != OP_PUSHDATA1 {
-			str := fmt.Sprintf("data push of %d bytes encoded "+
-				"with opcode %s instead of OP_PUSHDATA1",
-				dataLen, pop.opcode.name)
-			return scriptError(ErrMinimalData, str)
-		}
-	} else if dataLen <= 65535 {
-		if opcode != OP_PUSHDATA2 {
-			str := fmt.Sprintf("data push of %d bytes encoded "+
-				"with opcode %s instead of OP_PUSHDATA2",
-				dataLen, pop.opcode.name)
-			return scriptError(ErrMinimalData, str)
-		}
-	}
-	return nil
-}
-
-// print returns a human-readable string representation of the opcode for use
-// in script disassembly.
-func (pop *parsedOpcode) print(oneline bool) string {
-	// The reference implementation one-line disassembly replaces opcodes
-	// which represent values (e.g. OP_0 through OP_16 and OP_1NEGATE)
-	// with the raw value.  However, when not doing a one-line dissassembly,
-	// we prefer to show the actual opcode names.  Thus, only replace the
-	// opcodes in question when the oneline flag is set.
-	opcodeName := pop.opcode.name
-	if oneline {
-		if replName, ok := opcodeOnelineRepls[opcodeName]; ok {
-			opcodeName = replName
-		}
-
-		// Nothing more to do for non-data push opcodes.
-		if pop.opcode.length == 1 {
-			return opcodeName
-		}
-
-		return fmt.Sprintf("%x", pop.data)
-	}
-
-	// Nothing more to do for non-data push opcodes.
-	if pop.opcode.length == 1 {
-		return opcodeName
-	}
-
-	// Add length for the OP_PUSHDATA# opcodes.
-	retString := opcodeName
-	switch pop.opcode.length {
-	case -1:
-		retString += fmt.Sprintf(" 0x%02x", len(pop.data))
-	case -2:
-		retString += fmt.Sprintf(" 0x%04x", len(pop.data))
-	case -4:
-		retString += fmt.Sprintf(" 0x%08x", len(pop.data))
-	}
-
-	return fmt.Sprintf("%s 0x%02x", retString, pop.data)
-}
-
-// bytes returns any data associated with the opcode encoded as it would be in
-// a script.  This is used for unparsing scripts from parsed opcodes.
-func (pop *parsedOpcode) bytes() ([]byte, error) {
-	var retbytes []byte
-	if pop.opcode.length > 0 {
-		retbytes = make([]byte, 1, pop.opcode.length)
-	} else {
-		retbytes = make([]byte, 1, 1+len(pop.data)-
-			pop.opcode.length)
-	}
-
-	retbytes[0] = pop.opcode.value
-	if pop.opcode.length == 1 {
-		if len(pop.data) != 0 {
-			str := fmt.Sprintf("internal consistency error - "+
-				"parsed opcode %s has data length %d when %d "+
-				"was expected", pop.opcode.name, len(pop.data),
-				0)
-			return nil, scriptError(ErrInternal, str)
-		}
-		return retbytes, nil
-	}
-	nbytes := pop.opcode.length
-	if pop.opcode.length < 0 {
-		l := len(pop.data)
-		// tempting just to hardcode to avoid the complexity here.
-		switch pop.opcode.length {
-		case -1:
-			retbytes = append(retbytes, byte(l))
-			nbytes = int(retbytes[1]) + len(retbytes)
-		case -2:
-			retbytes = append(retbytes, byte(l&0xff),
-				byte(l>>8&0xff))
-			nbytes = int(binary.LittleEndian.Uint16(retbytes[1:])) +
-				len(retbytes)
-		case -4:
-			retbytes = append(retbytes, byte(l&0xff),
-				byte((l>>8)&0xff), byte((l>>16)&0xff),
-				byte((l>>24)&0xff))
-			nbytes = int(binary.LittleEndian.Uint32(retbytes[1:])) +
-				len(retbytes)
-		}
-	}
-
-	retbytes = append(retbytes, pop.data...)
-
-	if len(retbytes) != nbytes {
-		str := fmt.Sprintf("internal consistency error - "+
-			"parsed opcode %s has data length %d when %d was "+
-			"expected", pop.opcode.name, len(retbytes), nbytes)
-		return nil, scriptError(ErrInternal, str)
-	}
-
-	return retbytes, nil
-}
+//// print returns a human-readable string representation of the opcode for use
+//// in script disassembly.
+//func (pop *parsedOpcode) print(oneline bool) string {
+//	// The reference implementation one-line disassembly replaces opcodes
+//	// which represent values (e.g. OP_0 through OP_16 and OP_1NEGATE)
+//	// with the raw value.  However, when not doing a one-line dissassembly,
+//	// we prefer to show the actual opcode names.  Thus, only replace the
+//	// opcodes in question when the oneline flag is set.
+//	opcodeName := pop.opcode.name
+//	if oneline {
+//		if replName, ok := opcodeOnelineRepls[opcodeName]; ok {
+//			opcodeName = replName
+//		}
+//
+//		// Nothing more to do for non-data push opcodes.
+//		if pop.opcode.length == 1 {
+//			return opcodeName
+//		}
+//
+//		return fmt.Sprintf("%x", pop.data)
+//	}
+//
+//	// Nothing more to do for non-data push opcodes.
+//	if pop.opcode.length == 1 {
+//		return opcodeName
+//	}
+//
+//	// Add length for the OP_PUSHDATA# opcodes.
+//	retString := opcodeName
+//	switch pop.opcode.length {
+//	case -1:
+//		retString += fmt.Sprintf(" 0x%02x", len(pop.data))
+//	case -2:
+//		retString += fmt.Sprintf(" 0x%04x", len(pop.data))
+//	case -4:
+//		retString += fmt.Sprintf(" 0x%08x", len(pop.data))
+//	}
+//
+//	return fmt.Sprintf("%s 0x%02x", retString, pop.data)
+//}
+//
+//// bytes returns any data associated with the opcode encoded as it would be in
+//// a script.  This is used for unparsing scripts from parsed opcodes.
+//func (pop *parsedOpcode) bytes() ([]byte, error) {
+//	var retbytes []byte
+//	if pop.opcode.length > 0 {
+//		retbytes = make([]byte, 1, pop.opcode.length)
+//	} else {
+//		retbytes = make([]byte, 1, 1+len(pop.data)-
+//			pop.opcode.length)
+//	}
+//
+//	retbytes[0] = pop.opcode.value
+//	if pop.opcode.length == 1 {
+//		if len(pop.data) != 0 {
+//			str := fmt.Sprintf("internal consistency error - "+
+//				"parsed opcode %s has data length %d when %d "+
+//				"was expected", pop.opcode.name, len(pop.data),
+//				0)
+//			return nil, scriptError(ErrInternal, str)
+//		}
+//		return retbytes, nil
+//	}
+//	nbytes := pop.opcode.length
+//	if pop.opcode.length < 0 {
+//		l := len(pop.data)
+//		// tempting just to hardcode to avoid the complexity here.
+//		switch pop.opcode.length {
+//		case -1:
+//			retbytes = append(retbytes, byte(l))
+//			nbytes = int(retbytes[1]) + len(retbytes)
+//		case -2:
+//			retbytes = append(retbytes, byte(l&0xff),
+//				byte(l>>8&0xff))
+//			nbytes = int(binary.LittleEndian.Uint16(retbytes[1:])) +
+//				len(retbytes)
+//		case -4:
+//			retbytes = append(retbytes, byte(l&0xff),
+//				byte((l>>8)&0xff), byte((l>>16)&0xff),
+//				byte((l>>24)&0xff))
+//			nbytes = int(binary.LittleEndian.Uint32(retbytes[1:])) +
+//				len(retbytes)
+//		}
+//	}
+//
+//	retbytes = append(retbytes, pop.data...)
+//
+//	if len(retbytes) != nbytes {
+//		str := fmt.Sprintf("internal consistency error - "+
+//			"parsed opcode %s has data length %d when %d was "+
+//			"expected", pop.opcode.name, len(retbytes), nbytes)
+//		return nil, scriptError(ErrInternal, str)
+//	}
+//
+//	return retbytes, nil
+//}
 
 // *******************************************
 // Opcode implementation functions start here.
@@ -932,6 +931,7 @@ func opcodeFalse(op *opcode, data []byte, vm *Engine) error {
 // opcodePushData is a common handler for the vast majority of opcodes that push
 // raw data (bytes) to the data stack.
 func opcodePushData(op *opcode, data []byte, vm *Engine) error {
+	fmt.Printf("PUSH data: %x\n", data)
 	vm.dstack.PushByteArray(data)
 	return nil
 }
@@ -1025,20 +1025,36 @@ func popIfBool(vm *Engine) (bool, error) {
 // Data stack transformation: [... bool] -> [...]
 // Conditional stack transformation: [...] -> [... OpCondValue]
 func opcodeIf(op *opcode, data []byte, vm *Engine) error {
-	condVal := OpCondFalse
+	//condVal := OpCondFalse
+	//if vm.isBranchExecuting() {
+	//	ok, err := popIfBool(vm)
+	//	if err != nil {
+	//		return err
+	//	}
+
+	//	if ok {
+	//		condVal = OpCondTrue
+	//	}
+	//} else {
+	//	condVal = OpCondSkip
+	//}
+	//vm.condStack = append(vm.condStack, condVal)
 	if vm.isBranchExecuting() {
 		ok, err := popIfBool(vm)
 		if err != nil {
 			return err
 		}
-
-		if ok {
-			condVal = OpCondTrue
+		if !ok {
+			// Branch execution is being disabled when it was not previously, so
+			// mark the current conditional nesting depth as the depth at which
+			// it was disabled.
+			vm.condDisableDepth = vm.condNestDepth
 		}
-	} else {
-		condVal = OpCondSkip
 	}
-	vm.condStack = append(vm.condStack, condVal)
+
+	// Increment the conditional execution nesting depth to account for the
+	// conditional opcode.
+	vm.condNestDepth++
 	return nil
 }
 
@@ -1059,20 +1075,37 @@ func opcodeIf(op *opcode, data []byte, vm *Engine) error {
 // Data stack transformation: [... bool] -> [...]
 // Conditional stack transformation: [...] -> [... OpCondValue]
 func opcodeNotIf(op *opcode, data []byte, vm *Engine) error {
-	condVal := OpCondFalse
+	//condVal := OpCondFalse
+	//if vm.isBranchExecuting() {
+	//	ok, err := popIfBool(vm)
+	//	if err != nil {
+	//		return err
+	//	}
+
+	//	if !ok {
+	//		condVal = OpCondTrue
+	//	}
+	//} else {
+	//	condVal = OpCondSkip
+	//}
+	//vm.condStack = append(vm.condStack, condVal)
+	//return nil
 	if vm.isBranchExecuting() {
 		ok, err := popIfBool(vm)
 		if err != nil {
 			return err
 		}
-
-		if !ok {
-			condVal = OpCondTrue
+		if ok {
+			// Branch execution is being disabled when it was not previously, so
+			// mark the current conditional nesting depth as the depth at which
+			// it was disabled.
+			vm.condDisableDepth = vm.condNestDepth
 		}
-	} else {
-		condVal = OpCondSkip
 	}
-	vm.condStack = append(vm.condStack, condVal)
+
+	// Increment the conditional execution nesting depth to account for the
+	// conditional opcode.
+	vm.condNestDepth++
 	return nil
 }
 
@@ -1082,21 +1115,44 @@ func opcodeNotIf(op *opcode, data []byte, vm *Engine) error {
 //
 // Conditional stack transformation: [... OpCondValue] -> [... !OpCondValue]
 func opcodeElse(op *opcode, data []byte, vm *Engine) error {
-	if len(vm.condStack) == 0 {
+	//if len(vm.condStack) == 0 {
+	//	str := fmt.Sprintf("encountered opcode %s with no matching "+
+	//		"opcode to begin conditional execution", op.name)
+	//	return scriptError(ErrUnbalancedConditional, str)
+	//}
+
+	//conditionalIdx := len(vm.condStack) - 1
+	//switch vm.condStack[conditionalIdx] {
+	//case OpCondTrue:
+	//	vm.condStack[conditionalIdx] = OpCondFalse
+	//case OpCondFalse:
+	//	vm.condStack[conditionalIdx] = OpCondTrue
+	//case OpCondSkip:
+	//	// Value doesn't change in skip since it indicates this opcode
+	//	// is nested in a non-executed branch.
+	//}
+	//return nil
+	if vm.condNestDepth == 0 {
 		str := fmt.Sprintf("encountered opcode %s with no matching "+
 			"opcode to begin conditional execution", op.name)
 		return scriptError(ErrUnbalancedConditional, str)
 	}
 
-	conditionalIdx := len(vm.condStack) - 1
-	switch vm.condStack[conditionalIdx] {
-	case OpCondTrue:
-		vm.condStack[conditionalIdx] = OpCondFalse
-	case OpCondFalse:
-		vm.condStack[conditionalIdx] = OpCondTrue
-	case OpCondSkip:
-		// Value doesn't change in skip since it indicates this opcode
-		// is nested in a non-executed branch.
+	conditionalDepth := vm.condNestDepth - 1
+	switch {
+	case vm.isBranchExecuting():
+		// Branch execution is being disabled when it was not previously, so
+		// mark the most recent conditional nesting depth as the depth at which
+		// it was disabled.
+		vm.condDisableDepth = conditionalDepth
+
+	case vm.condDisableDepth == conditionalDepth:
+		// Enable branch execution when it was previously disabled as a result
+		// of the opcode at the depth that is being toggled.
+		vm.condDisableDepth = noCondDisableDepth
+
+	default:
+		// No effect since this opcode is nested in a non-executed branch.
 	}
 	return nil
 }
@@ -1108,13 +1164,27 @@ func opcodeElse(op *opcode, data []byte, vm *Engine) error {
 //
 // Conditional stack transformation: [... OpCondValue] -> [...]
 func opcodeEndif(op *opcode, data []byte, vm *Engine) error {
-	if len(vm.condStack) == 0 {
+	//if len(vm.condStack) == 0 {
+	//	str := fmt.Sprintf("encountered opcode %s with no matching "+
+	//		"opcode to begin conditional execution", op.name)
+	//	return scriptError(ErrUnbalancedConditional, str)
+	//}
+
+	//vm.condStack = vm.condStack[:len(vm.condStack)-1]
+	//return nil
+	if vm.condNestDepth == 0 {
 		str := fmt.Sprintf("encountered opcode %s with no matching "+
 			"opcode to begin conditional execution", op.name)
 		return scriptError(ErrUnbalancedConditional, str)
 	}
 
-	vm.condStack = vm.condStack[:len(vm.condStack)-1]
+	// Decrement the conditional execution nesting depth and enable branch
+	// execution if it was previously disabled as a result of the opcode at
+	// that depth.
+	vm.condNestDepth--
+	if vm.condDisableDepth == vm.condNestDepth {
+		vm.condDisableDepth = noCondDisableDepth
+	}
 	return nil
 }
 
@@ -2074,7 +2144,7 @@ func opcodeHash256(op *opcode, data []byte, vm *Engine) error {
 //
 // This opcode does not change the contents of the data stack.
 func opcodeCodeSeparator(op *opcode, data []byte, vm *Engine) error {
-	vm.lastCodeSep = vm.scriptOff
+	vm.lastCodeSep = vm.opcodeIdx
 	return nil
 }
 
@@ -2134,6 +2204,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 	if err := vm.checkPubKeyEncoding(pkBytes); err != nil {
 		return err
 	}
+	fmt.Println("pkBytes", pkBytes)
 
 	// Get script starting from the most recent OP_CODESEPARATOR.
 	subScript := vm.subScript()

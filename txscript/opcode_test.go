@@ -39,7 +39,7 @@ import (
 func TestOpcodeDisabled(t *testing.T) {
 	t.Parallel()
 	tests := []byte{OP_CAT, OP_SUBSTR, OP_LEFT, OP_RIGHT, OP_INVERT,
-		OP_AND, OP_OR, OP_2MUL, OP_2DIV, OP_MUL, OP_DIV, OP_MOD,
+		OP_AND, OP_OR, OP_XOR, OP_2MUL, OP_2DIV, OP_MUL, OP_DIV, OP_MOD,
 		OP_LSHIFT, OP_RSHIFT,
 	}
 	for _, opcodeVal := range tests {
@@ -147,14 +147,23 @@ func TestOpcodeDisasm(t *testing.T) {
 			expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
 		}
 
-		pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: data}
-		gotStr := pop.print(true)
+		var buf strings.Builder
+		disasmOpcode(&buf, &opcodeArray[opcodeVal], data, true)
+		gotStr := buf.String()
 		if gotStr != expectedStr {
 			t.Errorf("pop.print (opcode %x): Unexpected disasm "+
 				"string - got %v, want %v", opcodeVal, gotStr,
 				expectedStr)
 			continue
 		}
+		//pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: data}
+		//gotStr := pop.print(true)
+		//if gotStr != expectedStr {
+		//	t.Errorf("pop.print (opcode %x): Unexpected disasm "+
+		//		"string - got %v, want %v", opcodeVal, gotStr,
+		//		expectedStr)
+		//	continue
+		//}
 	}
 
 	// Now, replace the relevant fields and test the full disassembly.
@@ -213,8 +222,17 @@ func TestOpcodeDisasm(t *testing.T) {
 			expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
 		}
 
-		pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: data}
-		gotStr := pop.print(false)
+		//pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: data}
+		//gotStr := pop.print(false)
+		//if gotStr != expectedStr {
+		//	t.Errorf("pop.print (opcode %x): Unexpected disasm "+
+		//		"string - got %v, want %v", opcodeVal, gotStr,
+		//		expectedStr)
+		//	continue
+		//}
+		var buf strings.Builder
+		disasmOpcode(&buf, &opcodeArray[opcodeVal], data, false)
+		gotStr := buf.String()
 		if gotStr != expectedStr {
 			t.Errorf("pop.print (opcode %x): Unexpected disasm "+
 				"string - got %v, want %v", opcodeVal, gotStr,
