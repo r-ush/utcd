@@ -239,7 +239,20 @@ func mergeScripts(chainParams *chaincfg.Params, tx *wire.MsgTx, idx int,
 		//	return sigScript
 		//}
 
-		script := ExtractScriptHash(sigScript)
+		// Nothing to merge if either the new or previous signature
+		// scripts are empty or fail to parse.
+		if len(sigScript) == 0 ||
+			checkScriptParses(sigScript) != nil {
+
+			return prevScript
+		}
+		if len(prevScript) == 0 ||
+			checkScriptParses(prevScript) != nil {
+
+			return sigScript
+		}
+
+		script := finalOpcodeData(sigScript)
 		//// assume that script in sigPops is the correct one, we just
 		//// made it.
 		//script := sigPops[len(sigPops)-1].data

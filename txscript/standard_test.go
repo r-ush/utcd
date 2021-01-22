@@ -842,12 +842,12 @@ func TestCalcMultiSigStats(t *testing.T) {
 		script string
 		err    error
 	}{
-		//{
-		//	name: "short script",
-		//	script: "0x046708afdb0fe5548271967f1a67130b7105cd6a828" +
-		//		"e03909a67962e0ea1f61d",
-		//	err: scriptError(ErrMalformedPush, ""),
-		//},
+		{
+			name: "short script",
+			script: "0x046708afdb0fe5548271967f1a67130b7105cd6a828" +
+				"e03909a67962e0ea1f61d",
+			err: scriptError(ErrNotMultisigScript, ""),
+		},
 		{
 			name: "stack underflow",
 			script: "RETURN DATA_41 0x046708afdb0fe5548271967f1a" +

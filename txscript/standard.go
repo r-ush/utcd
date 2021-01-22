@@ -221,6 +221,33 @@ func isPubkeyHash(script []byte) bool {
 // isMultiSig returns whether or not the passed script is a standard
 // multisig script.
 func isMultiSig(script []byte) bool {
+	// A multi-signature script is of the form:
+	//  NUM_SIGS PUBKEY PUBKEY PUBKEY ... NUM_PUBKEYS OP_CHECKMULTISIG
+
+	//// The script can't possibly be a multisig script if it doesn't end with
+	//// OP_CHECKMULTISIG or have at least two small integer pushes preceding it.
+	//// Fail fast to avoid more work below.
+	//if len(script) < 3 || script[len(script)-1] != OP_CHECKMULTISIG {
+	//	return false
+	//}
+
+	//// The first opcode must be a small integer specifying the number of
+	//// signatures required.
+	//tokenizer := MakeScriptTokenizer(script)
+	//if !tokenizer.Next() || !isSmallIntNew(tokenizer.Opcode()) {
+	//	return false
+	//}
+
+	//// Skip the first op
+	//tokenizer.Next()
+	//for tokenizer.Next() {
+	//	data := tokenizer.Data()
+	//	// Valid pubkeys are either 33 or 65 bytes.
+	//	if len(data) != 33 && len(data) != 65 {
+	//		return false
+	//	}
+	//}
+
 	// Since this is only checking the form of the script, don't extract the
 	// public keys to avoid the allocation.
 	details := extractMultisigScriptDetails(script, false)
@@ -686,34 +713,35 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 // a multi-signature transaction script.  The passed script MUST already be
 // known to be a multi-signature script.
 func CalcMultiSigStats(script []byte) (int, int, error) {
-	//pops, err := parseScript(script)
-	//if err != nil {
-	//	return 0, 0, err
-	//}
+	// A multi-signature script is of the form:
+	//  NUM_SIGS PUBKEY PUBKEY PUBKEY ... NUM_PUBKEYS OP_CHECKMULTISIG
 
-	//// A multi-signature script is of the pattern:
-	////  NUM_SIGS PUBKEY PUBKEY PUBKEY... NUM_PUBKEYS OP_CHECKMULTISIG
-	//// Therefore the number of signatures is the oldest item on the stack
-	//// and the number of pubkeys is the 2nd to last.  Also, the absolute
-	//// minimum for a multi-signature script is 1 pubkey, so at least 4
-	//// items must be on the stack per:
-	////  OP_1 PUBKEY OP_1 OP_CHECKMULTISIG
-	//if len(pops) < 4 {
-	//	str := fmt.Sprintf("script %x is not a multisig script", script)
-	//	return 0, 0, scriptError(ErrNotMultisigScript, str)
-	//}
-
-	//numSigs := asSmallInt(pops[0].opcode)
-	//numPubKeys := asSmallInt(pops[len(pops)-2].opcode)
-	//return numPubKeys, numSigs, nil
-
-	details := extractMultisigScriptDetails(script, false)
-	if !details.valid {
+	// The script can't possibly be a multisig script if it doesn't end with
+	// OP_CHECKMULTISIG or have at least two small integer pushes preceding it.
+	// Fail fast to avoid more work below.
+	if len(script) < 3 || script[len(script)-1] != OP_CHECKMULTISIG {
 		str := fmt.Sprintf("script %x is not a multisig script", script)
 		return 0, 0, scriptError(ErrNotMultisigScript, str)
 	}
+	numPubKeys := AsSmallIntNew(script[len(script)-2])
 
-	return details.numPubKeys, details.requiredSigs, nil
+	// The first opcode must be a small integer specifying the number of
+	// signatures required.
+	tokenizer := MakeScriptTokenizer(script)
+	if !tokenizer.Next() || !isSmallIntNew(tokenizer.Opcode()) {
+		str := fmt.Sprintf("script %x is not a multisig script", script)
+		return 0, 0, scriptError(ErrNotMultisigScript, str)
+	}
+	requiredSigs := AsSmallIntNew(tokenizer.Opcode())
+
+	// Check if the script parses
+	for tokenizer.Next() {
+	}
+	if tokenizer.Err() != nil {
+		return 0, 0, tokenizer.Err()
+	}
+
+	return numPubKeys, requiredSigs, nil
 }
 
 // payToPubKeyHashScript creates a new script to pay a transaction
@@ -1082,7 +1110,7 @@ func ExtractPkScriptAddrs(pkScript []byte, chainParams *chaincfg.Params) (Script
 		requiredSigs = details.requiredSigs
 
 		// Extract the public keys while skipping any that are invalid.
-		//addrsBuf := make([]btcutil.Address, 0, details.numPubKeys)
+		addrs = make([]btcutil.Address, 0, details.numPubKeys)
 		for i := 0; i < details.numPubKeys; i++ {
 			addr, err := btcutil.NewAddressPubKey(details.pubKeys[i], chainParams)
 			if err == nil {

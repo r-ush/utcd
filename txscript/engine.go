@@ -561,11 +561,6 @@ func (vm *Engine) executeOpcode(op *opcode, data []byte) error {
 		return nil
 	}
 
-	//if data == nil {
-	//	fmt.Println("OPCODE", op.value)
-	//	fmt.Println("data", data)
-	//}
-
 	// Ensure all executed data push opcodes use the minimal encoding.
 	if vm.dstack.verifyMinimalData && vm.isBranchExecuting() &&
 		op.value >= 0 && op.value <= OP_PUSHDATA4 {
@@ -574,7 +569,6 @@ func (vm *Engine) executeOpcode(op *opcode, data []byte) error {
 		}
 	}
 
-	//fmt.Println("execute opcode op:", op.value)
 	return op.opfunc(op, data, vm)
 }
 
@@ -930,6 +924,14 @@ func (vm *Engine) CheckErrorCondition(finalScript bool) error {
 	if vm.scriptIdx < len(vm.scripts) {
 		return scriptError(ErrScriptUnfinished,
 			"error check when script unfinished")
+	}
+
+	// If we're in version zero witness execution mode, and this was the
+	// final script, then the stack MUST be clean in order to maintain
+	// compatibility with BIP16.
+	if finalScript && vm.isWitnessVersionActive(0) && vm.dstack.Depth() != 1 {
+		return scriptError(ErrEvalFalse, "witness program must "+
+			"have clean stack")
 	}
 
 	// The final script must end with exactly one data stack item when the

@@ -54,7 +54,8 @@ func genTestTx() (*wire.MsgTx, error) {
 // inserted.  Conversely, ContainsHashes should return false for any items
 // _not_ in the hash cache.
 func TestHashCacheAddContainsHashes(t *testing.T) {
-	t.Parallel()
+	// NOTE: Parallel is making this test fail sometimes.
+	//t.Parallel()
 
 	rand.Seed(time.Now().Unix())
 

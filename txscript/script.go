@@ -908,6 +908,11 @@ func shallowCopyTx(tx *wire.MsgTx) wire.MsgTx {
 // engine instance, calculate the signature hash to be used for signing and
 // verification.
 func CalcSignatureHash(script []byte, hashType SigHashType, tx *wire.MsgTx, idx int) ([]byte, error) {
+	err := checkScriptParses(script)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse output script: %v", err)
+	}
+
 	//parsedScript, err := parseScript(script)
 	//if err != nil {
 	//	return nil, fmt.Errorf("cannot parse output script: %v", err)
