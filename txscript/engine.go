@@ -1915,7 +1915,6 @@ func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags
 		vm.astack.verifyMinimalData = true
 	}
 
-	// FIXME kcalvinalvin: I know I'm not handling this part right
 	// Check to see if we should execute in witness verification mode
 	// according to the set flags. We check both the pkScript, and sigScript
 	// here since in the case of nested p2sh, the scriptSig will be a valid
@@ -1932,9 +1931,7 @@ func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags
 		var witProgram []byte
 
 		switch {
-		// FIXME idk going to bed. This is wrong since script used to be
-		// a parsed script not a byte slice
-		case isWitnessProgram(vm.scripts[1]):
+		case IsWitnessProgram(vm.scripts[1]):
 			// The scriptSig must be *empty* for all native witness
 			// programs, otherwise we introduce malleability.
 			if len(scriptSig) != 0 {

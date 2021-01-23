@@ -99,7 +99,6 @@ out:
 					txVI.tx.Hash(), txVI.txInIndex,
 					txIn.PreviousOutPoint, err, witness,
 					sigScript, pkScript)
-				panic(str)
 				err := ruleError(ErrScriptValidation, str)
 				v.sendResult(err)
 				break out

@@ -160,26 +160,26 @@ func isWitnessPubKeyHashNew(script []byte) bool {
 		script[1] == OP_DATA_20
 }
 
-// IsWitnessProgram returns true if the passed script is a valid witness
-// program which is encoded according to the passed witness program version. A
-// witness program must be a small integer (from 0-16), followed by 2-40 bytes
-// of pushed data.
-func IsWitnessProgram(script []byte) bool {
-	// The length of the script must be between 4 and 42 bytes. The
-	// smallest program is the witness version, followed by a data push of
-	// 2 bytes.  The largest allowed witness program has a data push of
-	// 40-bytes.
-	if len(script) < 4 || len(script) > 42 {
-		return false
-	}
-
-	//pops, err := parseScript(script)
-	//if err != nil {
-	//	return false
-	//}
-
-	return isWitnessProgram(script)
-}
+//// IsWitnessProgram returns true if the passed script is a valid witness
+//// program which is encoded according to the passed witness program version. A
+//// witness program must be a small integer (from 0-16), followed by 2-40 bytes
+//// of pushed data.
+//func IsWitnessProgram(script []byte) bool {
+//	// The length of the script must be between 4 and 42 bytes. The
+//	// smallest program is the witness version, followed by a data push of
+//	// 2 bytes.  The largest allowed witness program has a data push of
+//	// 40-bytes.
+//	if len(script) < 4 || len(script) > 42 {
+//		return false
+//	}
+//
+//	//pops, err := parseScript(script)
+//	//if err != nil {
+//	//	return false
+//	//}
+//
+//	return isWitnessProgram(script)
+//}
 
 //// isWitnessProgram returns true if the passed script is a witness program, and
 //// false otherwise. A witness program MUST adhere to the following constraints:
@@ -201,10 +201,10 @@ func IsWitnessProgram(script []byte) bool {
 // first opcode MUST be a small integer (0-16), the push data MUST be
 // canonical, and finally the size of the push data must be between 2 and 40
 // bytes.
-func isWitnessProgram(script []byte) bool {
-	//if len(script) < 4 || len(script) > 42 {
-	//	return false
-	//}
+func IsWitnessProgram(script []byte) bool {
+	if len(script) < 4 || len(script) > 42 {
+		return false
+	}
 	tokenizer := MakeScriptTokenizer(script)
 
 	tokenizer.Next()
@@ -235,7 +235,7 @@ func ExtractWitnessProgramInfo(script []byte) (int, []byte, error) {
 	// If at this point, the scripts doesn't resemble a witness program,
 	// then we'll exit early as there isn't a valid version or program to
 	// extract.
-	if !isWitnessProgram(script) {
+	if !IsWitnessProgram(script) {
 		return 0, nil, fmt.Errorf("script is not a witness program, " +
 			"unable to extract version or witness program")
 	}

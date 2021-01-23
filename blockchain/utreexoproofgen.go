@@ -94,10 +94,6 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 		return nil, nil
 	}
 	inskip, outskip := block.DedupeBlock()
-	if block.Height() == 119058 {
-		fmt.Println("outskip", outskip)
-		fmt.Println("inskip", inskip)
-	}
 	dels, err := blockToDelLeaves(stxos, block, inskip)
 	if err != nil {
 		return nil, err
@@ -115,7 +111,7 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	//		panic(s)
 	//	}
 	//}
-	ud.TxoTTLs = make([]int32, len(adds))
+	//ud.TxoTTLs = make([]int32, len(adds))
 	//	fmt.Println("ud height:", ud.Height)
 	//	fmt.Println("ud ttl len:", len(ud.TxoTTLs))
 	//	fmt.Println("ud stxos len:", len(ud.Stxos))
@@ -189,9 +185,6 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 		for outIdx, txOut := range tx.MsgTx().TxOut {
 			// Skip all the OP_RETURNs
 			if isUnspendable(txOut) {
-				if block.Height() == 119058 {
-					fmt.Println("OP RETURN!", txonum)
-				}
 				txonum++
 				continue
 			}
@@ -202,9 +195,6 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 			//}
 			// Skip txos on the skip list
 			if len(outskip) > 0 && outskip[0] == txonum {
-				if block.Height() == 119058 {
-					fmt.Println("OUTSKIP!", txonum)
-				}
 				outskip = outskip[1:]
 				txonum++
 				continue

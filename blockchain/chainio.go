@@ -1634,7 +1634,7 @@ func (b *BlockChain) FlushMemBlockStore() error {
 		return err
 	}
 	err = b.db.Update(func(dbTx database.Tx) error {
-		fmt.Println("STORE BLOCK", b.memBlocks.blocks.Hash())
+		log.Infof("Flushing block %x", b.memBlocks.blocks.Hash())
 		err := dbTx.StoreBlock(b.memBlocks.blocks)
 		if err != nil {
 			return err
@@ -1667,7 +1667,7 @@ func (b *BlockChain) PutUtreexoView() error {
 	b.utreexoQuit = true
 
 	err := b.db.Update(func(dbTx database.Tx) error {
-		fmt.Println("STORE Utreexo")
+		log.Infof("STORE Utreexo roots at block %x", *b.memBlocks.blocks.Hash())
 		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlocks.blocks.Hash())
 		//for i := 0; i < len(b.memBlocks.blocks); i++ {
 		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
