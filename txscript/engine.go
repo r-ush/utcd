@@ -1931,7 +1931,7 @@ func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags
 		var witProgram []byte
 
 		switch {
-		case IsWitnessProgram(vm.scripts[1]):
+		case isWitnessProgram(vm.scripts[1]):
 			// The scriptSig must be *empty* for all native witness
 			// programs, otherwise we introduce malleability.
 			if len(scriptSig) != 0 {
@@ -1949,7 +1949,10 @@ func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags
 
 			// move tokenizer just once
 			tokenizer := MakeScriptTokenizer(sigScript)
-			tokenizer.Next()
+			if !tokenizer.Next() {
+				return nil, scriptError(ErrMalformedPush,
+					ErrMalformedPush.String())
+			}
 
 			data := tokenizer.Data()
 			op := tokenizer.Opcode()

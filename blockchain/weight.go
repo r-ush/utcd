@@ -102,8 +102,8 @@ func GetSigOpCost(tx *btcutil.Tx, isCoinBaseTx bool, utxoView *UtxoViewpoint, bi
 					"exist or has already been spent",
 					txIn.PreviousOutPoint, tx.Hash(),
 					txInIndex)
-				panic(str)
-				//return 0, ruleError(ErrMissingTxOut, str)
+				//panic(str)
+				return 0, ruleError(ErrMissingTxOut, str)
 			}
 
 			witness := txIn.Witness

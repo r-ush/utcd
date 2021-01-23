@@ -195,25 +195,46 @@ func isWitnessPubKeyHashNew(script []byte) bool {
 //
 //}
 
+// IsWitnessProgram returns true if the passed script is a valid witness
+// program which is encoded according to the passed witness program version. A
+// witness program must be a small integer (from 0-16), followed by 2-40 bytes
+// of pushed data.
+func IsWitnessProgram(script []byte) bool {
+	// The length of the script must be between 4 and 42 bytes. The
+	// smallest program is the witness version, followed by a data push of
+	// 2 bytes.  The largest allowed witness program has a data push of
+	// 40-bytes.
+	if len(script) < 4 || len(script) > 42 {
+		return false
+	}
+
+	err := checkScriptParses(script)
+	if err != nil {
+		return false
+	}
+
+	return isWitnessProgram(script)
+}
+
 // isWitnessProgram returns true if the passed script is a witness program, and
 // false otherwise. A witness program MUST adhere to the following constraints:
 // there must be exactly two pops (program version and the program itself), the
 // first opcode MUST be a small integer (0-16), the push data MUST be
 // canonical, and finally the size of the push data must be between 2 and 40
 // bytes.
-func IsWitnessProgram(script []byte) bool {
-	if len(script) < 4 || len(script) > 42 {
-		return false
-	}
+func isWitnessProgram(script []byte) bool {
 	tokenizer := MakeScriptTokenizer(script)
-
-	tokenizer.Next()
-	if !isSmallIntNew(tokenizer.Opcode()) {
+	if !tokenizer.Next() || !isSmallIntNew(tokenizer.Opcode()) {
 		return false
 	}
 
-	tokenizer.Next()
-	if !isCanonicalPush(tokenizer.Opcode(), tokenizer.Data()) {
+	if !tokenizer.Next() || !isCanonicalPush(
+		tokenizer.Opcode(), tokenizer.Data()) {
+		return false
+	}
+
+	// Should be exactly two ops
+	if !tokenizer.Done() {
 		return false
 	}
 
@@ -232,19 +253,28 @@ func ExtractWitnessProgramInfo(script []byte) (int, []byte, error) {
 	//	return 0, nil, err
 	//}
 
+	err := checkScriptParses(script)
+	if err != nil {
+		return 0, nil, err
+	}
+
 	// If at this point, the scripts doesn't resemble a witness program,
 	// then we'll exit early as there isn't a valid version or program to
 	// extract.
-	if !IsWitnessProgram(script) {
+	if !isWitnessProgram(script) {
 		return 0, nil, fmt.Errorf("script is not a witness program, " +
 			"unable to extract version or witness program")
 	}
 
 	tokenizer := MakeScriptTokenizer(script)
-	tokenizer.Next()
+	if !tokenizer.Next() {
+		return 0, nil, scriptError(ErrMalformedPush, ErrMalformedPush.String())
+	}
 	witnessVersion := AsSmallIntNew(tokenizer.Opcode())
 	//witnessVersion := AsSmallInt(pops[0].opcode.value)
-	tokenizer.Next()
+	if !tokenizer.Next() {
+		return 0, nil, scriptError(ErrMalformedPush, ErrMalformedPush.String())
+	}
 	witnessProgram := tokenizer.Data()
 	//witnessProgram := pops[1].data
 
@@ -807,7 +837,9 @@ func calcWitnessSignatureHash(subScript []byte, sigHashes *TxSigHashes,
 	//fmt.Printf("subscript %x\n", subScript)
 	if isWitnessPubKeyHashNew(subScript) {
 		tokenizer := MakeScriptTokenizer(subScript)
-		tokenizer.Next()
+		if !tokenizer.Next() {
+			return nil, scriptError(ErrMalformedPush, ErrMalformedPush.String())
+		}
 		// The script code for a p2wkh is a length prefix varint for
 		// the next 25 bytes, followed by a re-creation of the original
 		// p2pkh pk script.
@@ -955,8 +987,8 @@ func calcSignatureHash(script []byte, hashType SigHashType, tx *wire.MsgTx, idx 
 
 	// Make a shallow copy of the transaction, zeroing out the script for
 	// all inputs that are not currently being processed.
-	tokenizer := MakeScriptTokenizer(script)
-	tokenizer.Next()
+	//tokenizer := MakeScriptTokenizer(script)
+	//tokenizer.Next()
 	txCopy := shallowCopyTx(tx)
 	for i := range txCopy.TxIn {
 		if i == idx {
