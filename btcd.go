@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
+	"runtime/trace"
 
 	"github.com/btcsuite/btcd/blockchain/indexers"
 	"github.com/btcsuite/btcd/database"
@@ -328,11 +329,21 @@ func loadBlockDB() (database.DB, error) {
 }
 
 func main() {
+	// Use all processor cores.
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	// Block and transaction processing can cause bursty allocations.  This
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	debug.SetGCPercent(10)
+	debug.SetGCPercent(200)
+
+	//f, err := os.Create("trace.out")
+	//if err != nil {
+	//	fmt.Println(err)
+	//	os.Exit(1)
+	//}
+	//trace.Start(f)
 	//runtime.MemProfileRate = 1
 
 	// Up some limits.
@@ -357,8 +368,10 @@ func main() {
 
 	// Work around defer not working after os.Exit()
 	if err := btcdMain(nil); err != nil {
+		trace.Stop()
 		os.Exit(1)
 	}
+	//trace.Stop()
 	//runtime.GC()
 	//memf, _ := os.Create("memprof")
 	//pprof.WriteHeapProfile(memf)

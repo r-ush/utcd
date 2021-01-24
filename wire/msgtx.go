@@ -433,8 +433,10 @@ func (msg *MsgTx) Copy() *MsgTx {
 // See Deserialize for decoding transactions stored to disk, such as in a
 // database, as opposed to decoding transactions from the wire.
 func (msg *MsgTx) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
-	version, err := binarySerializer.Uint32(r, littleEndian)
+	bs := newSerializer()
+	version, err := bs.Uint32(r, littleEndian)
 	if err != nil {
+		bs.free()
 		return err
 	}
 	//buf := make([]byte, 4)
@@ -608,7 +610,8 @@ func (msg *MsgTx) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error
 		}
 	}
 
-	msg.LockTime, err = binarySerializer.Uint32(r, littleEndian)
+	msg.LockTime, err = bs.Uint32(r, littleEndian)
+	bs.free()
 	if err != nil {
 		returnScriptBuffers()
 		return err
@@ -720,8 +723,10 @@ func (msg *MsgTx) DeserializeNoWitness(r io.Reader) error {
 // See Serialize for encoding transactions to be stored to disk, such as in a
 // database, as opposed to encoding transactions for the wire.
 func (msg *MsgTx) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
-	err := binarySerializer.PutUint32(w, littleEndian, uint32(msg.Version))
+	bs := newSerializer()
+	err := bs.PutUint32(w, littleEndian, uint32(msg.Version))
 	if err != nil {
+		bs.free()
 		return err
 	}
 	//buf := make([]byte, 4)
@@ -784,7 +789,9 @@ func (msg *MsgTx) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error
 		}
 	}
 
-	return binarySerializer.PutUint32(w, littleEndian, msg.LockTime)
+	err = bs.PutUint32(w, littleEndian, msg.LockTime)
+	bs.free()
+	return err
 	//byteOrder.PutUint32(buf, msg.LockTime)
 	//_, err = w.Write(buf)
 	//if err != nil {
@@ -955,7 +962,9 @@ func readOutPoint(r io.Reader, pver uint32, version int32, op *OutPoint) error {
 		return err
 	}
 
-	op.Index, err = binarySerializer.Uint32(r, littleEndian)
+	bs := newSerializer()
+	op.Index, err = bs.Uint32(r, littleEndian)
+	bs.free()
 	//buf := make([]byte, 4)
 	//if _, err := io.ReadFull(r, buf); err != nil {
 	//	return err
@@ -972,7 +981,10 @@ func writeOutPoint(w io.Writer, pver uint32, version int32, op *OutPoint) error 
 		return err
 	}
 
-	return binarySerializer.PutUint32(w, littleEndian, op.Index)
+	bs := newSerializer()
+	err = bs.PutUint32(w, littleEndian, op.Index)
+	bs.free()
+	return err
 	//buf := make([]byte, 4)
 	//byteOrder.PutUint32(buf, op.Index)
 	//_, err = w.Write(buf)
@@ -1043,7 +1055,10 @@ func writeTxIn(w io.Writer, pver uint32, version int32, ti *TxIn) error {
 		return err
 	}
 
-	return binarySerializer.PutUint32(w, littleEndian, ti.Sequence)
+	bs := newSerializer()
+	err = bs.PutUint32(w, littleEndian, ti.Sequence)
+	bs.free()
+	return err
 	//buf := make([]byte, 4)
 	//byteOrder.PutUint32(buf, ti.Sequence)
 	//_, err = w.Write(buf)
@@ -1073,7 +1088,9 @@ func readTxOut(r io.Reader, pver uint32, version int32, to *TxOut) error {
 // NOTE: This function is exported in order to allow txscript to compute the
 // new sighashes for witness transactions (BIP0143).
 func WriteTxOut(w io.Writer, pver uint32, version int32, to *TxOut) error {
-	err := binarySerializer.PutUint64(w, littleEndian, uint64(to.Value))
+	bs := newSerializer()
+	err := bs.PutUint64(w, littleEndian, uint64(to.Value))
+	bs.free()
 	if err != nil {
 		return err
 	}

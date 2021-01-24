@@ -1355,7 +1355,8 @@ func IsUnspendable(pkScript []byte) bool {
 
 		return true
 	}
+	return false
 
 	// The script is unspendable if it is guaranteed to fail at execution.
-	return checkScriptParses(pkScript) != nil
+	//return checkScriptParses(pkScript) != nil
 }
