@@ -651,10 +651,10 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 
 	_, outskip := ub.Block().DedupeBlock()
 
-	shouldadd := len(outskip)
+	//shouldadd := len(outskip)
 
 	var txonum uint32
-	var added int
+	//var added int
 	for coinbaseif0, tx := range ub.Block().Transactions() {
 		for idx, txOut := range tx.MsgTx().TxOut {
 			// Skip all the OP_RETURNs
@@ -673,16 +673,16 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 				m[op] = utxo
 				outskip = outskip[1:]
 				txonum++
-				added++
+				//added++
 				continue
 			}
 			txonum++
 		}
 	}
-	if added != shouldadd {
-		s := fmt.Errorf("should add %v but only added %v. txonum final:%v", shouldadd, added, txonum)
-		panic(s)
-	}
+	//if added != shouldadd {
+	//	s := fmt.Errorf("should add %v but only added %v. txonum final:%v", shouldadd, added, txonum)
+	//	panic(s)
+	//}
 
 	return nil
 }

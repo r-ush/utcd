@@ -390,8 +390,7 @@ func CountP2SHSigOps(tx *btcutil.Tx, isCoinBaseTx bool, utxoView *UtxoViewpoint)
 				"transaction %s:%d either does not exist or "+
 				"has already been spent", txIn.PreviousOutPoint,
 				tx.Hash(), txInIndex)
-			panic(str)
-			//return 0, ruleError(ErrMissingTxOut, str)
+			return 0, ruleError(ErrMissingTxOut, str)
 		}
 
 		// We're only interested in pay-to-script-hash types, so skip
@@ -887,8 +886,7 @@ func CheckTransactionInputs(tx *btcutil.Tx, txHeight int32, utxoView *UtxoViewpo
 				"transaction %s:%d either does not exist or "+
 				"has already been spent", txIn.PreviousOutPoint,
 				tx.Hash(), txInIndex)
-			panic(str)
-			//return 0, ruleError(ErrMissingTxOut, str)
+			return 0, ruleError(ErrMissingTxOut, str)
 		}
 
 		// Ensure the transaction is not spending coins which have not

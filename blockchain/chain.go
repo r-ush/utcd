@@ -121,7 +121,7 @@ type BlockChain struct {
 	utreexoCSN       bool // enable utreexo compact-state-node
 	ttl              bool // enable time-to-live tracking for txos
 	utreexoLookAhead int  // set a value for the ttl
-	memBlocks        *memBlockStore
+	memBlock         *memBlockStore
 	memBestState     *memBestState
 	proofFileState   *ProofFileState
 	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
@@ -904,7 +904,7 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) erro
 
 	b.memBestState.state = state
 	b.memBestState.workSum = node.workSum
-	b.memBlocks.StoreBlock(ublock.Block())
+	b.memBlock.StoreBlock(ublock.Block())
 
 	//// Add the block hash and height to the block index which tracks
 	//// the main chain.
@@ -1448,7 +1448,6 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 		view := NewUtxoViewpoint()
 		view.SetBestHash(parentHash)
 		stxos := make([]SpentTxOut, 0, countSpentOutputs(block))
-		//sstxos := make([]SpentTxOut, 0, countDedupedStxos(block))
 		if !fastAdd {
 			err := b.checkConnectBlock(node, block, view, &stxos)
 			if err == nil {
@@ -1570,19 +1569,18 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 //
 // This function MUST be called with the chain state lock held (for writes).
 func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
-	//fastAdd := flags&BFFastAdd == BFFastAdd
-	var fastAdd bool
+	fastAdd := flags&BFFastAdd == BFFastAdd
 
-	flushIndexState := func() {
-		// Intentionally ignore errors writing updated node status to DB. If
-		// it fails to write, it's not the end of the world. If the block is
-		// valid, we flush in connectBlock and if the block is invalid, the
-		// worst that can happen is we revalidate the block after a restart.
-		if writeErr := b.index.flushToDB(); writeErr != nil {
-			log.Warnf("Error flushing block index changes to disk: %v",
-				writeErr)
-		}
-	}
+	//flushIndexState := func() {
+	//	// Intentionally ignore errors writing updated node status to DB. If
+	//	// it fails to write, it's not the end of the world. If the block is
+	//	// valid, we flush in connectBlock and if the block is invalid, the
+	//	// worst that can happen is we revalidate the block after a restart.
+	//	if writeErr := b.index.flushToDB(); writeErr != nil {
+	//		log.Warnf("Error flushing block index changes to disk: %v",
+	//			writeErr)
+	//	}
+	//}
 
 	// We are extending the main (best) chain with a new block.  This is the
 	// most common case.
@@ -1618,6 +1616,12 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		// utxos, spend them, and add the new utxos being created by
 		// this block.
 		if fastAdd {
+			// Check that the ublock txOuts are valid
+			err := b.utreexoViewpoint.Modify(ublock)
+			if err != nil {
+				return false, err
+			}
+
 			view.UBlockToUtxoView(*ublock)
 		}
 
@@ -1631,7 +1635,7 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 				b.index.SetStatusFlags(node, statusValidateFailed)
 			}
 
-			flushIndexState()
+			//flushIndexState()
 
 			return false, err
 		}
@@ -2275,9 +2279,12 @@ func New(config *Config) (*BlockChain, error) {
 		return nil, err
 	}
 
-	// Perform any upgrades to the various chain-specific buckets as needed.
-	if err := b.maybeUpgradeDbBuckets(config.Interrupt); err != nil {
-		return nil, err
+	// don't check for csns
+	if !b.utreexoCSN {
+		// Perform any upgrades to the various chain-specific buckets as needed.
+		if err := b.maybeUpgradeDbBuckets(config.Interrupt); err != nil {
+			return nil, err
+		}
 	}
 
 	// Initialize and catch up all of the currently active optional indexes

@@ -7,7 +7,6 @@ package blockchain
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
 	"github.com/mit-dci/utreexo/btcacc"
@@ -15,21 +14,20 @@ import (
 
 type UtreexoViewpoint struct {
 	accumulator accumulator.Pollard
-	//entries     map[chainhash.Hash]*btcacc.LeafData
-	bestHash chainhash.Hash
+	//bestHash    chainhash.Hash
 }
 
-// BestHash returns the hash of the best block in the chain the view currently
-// respresents.
-func (uview *UtreexoViewpoint) BestHash() *chainhash.Hash {
-	return &uview.bestHash
-}
+//// BestHash returns the hash of the best block in the chain the view currently
+//// respresents.
+//func (uview *UtreexoViewpoint) BestHash() *chainhash.Hash {
+//	return &uview.bestHash
+//}
 
-// SetBestHash sets the hash of the best block in the chain the view currently
-// respresents.
-func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
-	uview.bestHash = *hash
-}
+//// SetBestHash sets the hash of the best block in the chain the view currently
+//// respresents.
+//func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
+//	uview.bestHash = *hash
+//}
 
 // Modify takes an ublock and adds the utxos and deletes the stxos from the utreexo state
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
@@ -39,16 +37,12 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 
 	err := ub.ProofSanity(inskip, nl, h)
 	if err != nil {
-		panic(err)
-		//return err
-		//return fmt.Errorf(
-		//	"uData missing utxo data for block %d err: %e", ub.Block().Height(), err)
+		return err
 	}
 
 	err = uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
 	if err != nil {
-		panic(err)
-		//return err
+		return err
 	}
 
 	remember := make([]bool, len(ub.MsgUBlock().UtreexoData.TxoTTLs))
@@ -60,11 +54,8 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 
 	err = uview.accumulator.Modify(leaves, ub.MsgUBlock().UtreexoData.AccProof.Targets)
 	if err != nil {
-		panic(err)
-		//return err
+		return err
 	}
-
-	uview.bestHash = *ub.Block().Hash()
 
 	return nil
 }

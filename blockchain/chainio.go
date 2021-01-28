@@ -167,18 +167,18 @@ func serializeUtreexoView(uView *UtreexoViewpoint) ([]byte, error) {
 		return nil, err
 	}
 
-	serializedAcc = append(serializedAcc, uView.bestHash[:]...)
+	//serializedAcc = append(serializedAcc, uView.bestHash[:]...)
 
 	return serializedAcc, nil
 }
 
 func deserializeUtreexoView(uView *UtreexoViewpoint, serializedUView []byte) error {
-	bestHash := serializedUView[len(serializedUView)-chainhash.HashSize:]
+	//bestHash := serializedUView[len(serializedUView)-chainhash.HashSize:]
 
-	if len(bestHash) != chainhash.HashSize {
-		return errDeserialize(fmt.Sprintf("deserialized bestHash less than 32 bytes"+"bestHash: %v", bestHash))
-	}
-	copy(uView.bestHash[:], bestHash)
+	//if len(bestHash) != chainhash.HashSize {
+	//	return errDeserialize(fmt.Sprintf("deserialized bestHash less than 32 bytes"+"bestHash: %v", bestHash))
+	//}
+	//copy(uView.bestHash[:], bestHash)
 
 	err := uView.accumulator.Deserialize(serializedUView)
 	if err != nil {
@@ -1271,7 +1271,7 @@ func (b *BlockChain) createChainState() error {
 				return err
 			}
 			if b.utreexoCSN {
-				b.memBlocks = &memBlockStore{}
+				b.memBlock = &memBlockStore{}
 				b.memBestState = &memBestState{}
 			}
 		}
@@ -1453,8 +1453,8 @@ func (b *BlockChain) initChainState() error {
 		if b.utreexoCSN {
 			newBlock := btcutil.NewBlock(&block)
 			newBlock.SetHeight(tip.height)
-			b.memBlocks = &memBlockStore{
-				blocks: newBlock,
+			b.memBlock = &memBlockStore{
+				block: newBlock,
 			}
 
 			b.memBestState = &memBestState{}
@@ -1597,12 +1597,12 @@ func (b *BlockChain) FlushMemBestState() error {
 }
 
 type memBlockStore struct {
-	blocks *btcutil.Block
+	block *btcutil.Block
 }
 
 // StoreBlock keeps 12 blocks in memory in a fifo structure
 func (mbs *memBlockStore) StoreBlock(block *btcutil.Block) {
-	mbs.blocks = block
+	mbs.block = block
 	//mbs.blocks = append(mbs.blocks, block)
 
 	//// 12 is the max blocks to keep on memory
@@ -1614,8 +1614,8 @@ func (mbs *memBlockStore) StoreBlock(block *btcutil.Block) {
 // FetchBlock returns the block thats stored in memory. Returns nil if the block
 // isn't there
 func (mbs *memBlockStore) FetchBlock(hash *chainhash.Hash) *btcutil.Block {
-	if mbs.blocks.Hash() == hash {
-		return mbs.blocks
+	if mbs.block.Hash() == hash {
+		return mbs.block
 	}
 	//for i := 0; i < len(mbs.blocks); i++ {
 	//	if mbs.blocks[i].Hash() == hash {
@@ -1637,13 +1637,13 @@ func (b *BlockChain) FlushMemBlockStore() error {
 		return err
 	}
 	err = b.db.Update(func(dbTx database.Tx) error {
-		log.Infof("Flushing block %v", b.memBlocks.blocks.Hash())
-		err := dbTx.StoreBlock(b.memBlocks.blocks)
+		log.Infof("Flushing block %v", b.memBlock.block.Hash())
+		err := dbTx.StoreBlock(b.memBlock.block)
 		if err != nil {
 			return err
 		}
-		err = dbPutBlockIndex(dbTx, b.memBlocks.blocks.Hash(),
-			b.memBlocks.blocks.Height())
+		err = dbPutBlockIndex(dbTx, b.memBlock.block.Hash(),
+			b.memBlock.block.Height())
 		if err != nil {
 			return err
 		}
@@ -1670,8 +1670,8 @@ func (b *BlockChain) PutUtreexoView() error {
 	b.utreexoQuit = true
 
 	err := b.db.Update(func(dbTx database.Tx) error {
-		log.Infof("STORE Utreexo roots at block %v", *b.memBlocks.blocks.Hash())
-		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlocks.blocks.Hash())
+		log.Infof("STORE Utreexo roots at block %v", *b.memBlock.block.Hash())
+		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlock.block.Hash())
 		//for i := 0; i < len(b.memBlocks.blocks); i++ {
 		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
 		//	if err != nil {
