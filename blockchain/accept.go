@@ -68,6 +68,7 @@ func (b *BlockChain) maybeAcceptBlock(block *btcutil.Block, flags BehaviorFlags)
 	newNode.status = statusDataStored
 
 	b.index.AddNode(newNode)
+	newNode.BuildAncestor()
 	err = b.index.flushToDB()
 	if err != nil {
 		return false, err
@@ -139,6 +140,7 @@ func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFla
 	// on a side chain.
 	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
 	newNode := newBlockNode(blockHeader, prevNode)
+	newNode.BuildAncestor()
 	newNode.status = statusDataStored
 
 	b.index.AddNode(newNode)

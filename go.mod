@@ -15,7 +15,7 @@ require (
 	github.com/jrick/logrotate v1.0.0
 	github.com/mit-dci/utreexo v0.0.0-20201228143410-ba535a0beae8
 	github.com/syndtr/goleveldb v1.0.0
-	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
+	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 )
 
-replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210114145529-e5b0277fd655
+replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210128061119-1d9d9d57ced6

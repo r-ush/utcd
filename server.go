@@ -726,13 +726,13 @@ func (sp *serverPeer) OnGetData(_ *peer.Peer, msg *wire.MsgGetData) {
 		case wire.InvTypeTx:
 			err = sp.server.pushTxMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
 		case wire.InvTypeWitnessBlock:
-			//err = sp.server.pushBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
+			err = sp.server.pushBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
 		case wire.InvTypeBlock:
-			//err = sp.server.pushBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
+			err = sp.server.pushBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
 		case wire.InvTypeFilteredWitnessBlock:
-			//err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
+			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
 		case wire.InvTypeFilteredBlock:
-			//err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
+			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
 		case wire.InvTypeUBlock:
 			err = sp.server.pushUBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
 		case wire.InvTypeWitnessUBlock:
@@ -2837,9 +2837,10 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.NoPeerBloomFilters {
 		services &^= wire.SFNodeBloom
 	}
-	if cfg.NoCFilters {
-		services &^= wire.SFNodeCF
-	}
+	// Don't serve cfilters by default for utreexo
+	// NOTE remove for PR
+	services &^= wire.SFNodeCF
+
 	if cfg.Utreexo {
 		indxLog.Info("set utreexo bridge service")
 		services |= wire.SFNodeUtreexo
@@ -2920,7 +2921,9 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		s.addrIndex = indexers.NewAddrIndex(db, chainParams)
 		indexes = append(indexes, s.addrIndex)
 	}
-	if !cfg.NoCFilters {
+	// Don't serve cfilters by default for utreexo
+	// NOTE remove for PR
+	if false {
 		indxLog.Info("Committed filter index is enabled")
 		s.cfIndex = indexers.NewCfIndex(db, chainParams)
 		indexes = append(indexes, s.cfIndex)

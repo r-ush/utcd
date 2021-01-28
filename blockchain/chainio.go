@@ -228,6 +228,11 @@ func dbFetchUtreexoView(dbTx database.Tx, blockHash chainhash.Hash) (*UtreexoVie
 	return uView, err
 }
 
+func dbRemoveUtreexoView(dbTx database.Tx, blockHash chainhash.Hash) error {
+	utreexoBucket := dbTx.Metadata().Bucket(utreexoCSBucketName)
+	return utreexoBucket.Delete([]byte(blockHash[:]))
+}
+
 // -----------------------------------------------------------------------------
 // The transaction spend journal consists of an entry for each block connected
 // to the main chain which contains the transaction outputs the block spends
@@ -1281,9 +1286,6 @@ func (b *BlockChain) createChainState() error {
 			}
 		}
 
-		//if b.ttl {
-		//}
-
 		// Store the genesis block into the database.
 		return dbStoreBlock(dbTx, genesisBlock)
 	})
@@ -1387,6 +1389,7 @@ func (b *BlockChain) initChainState() error {
 			// and add it to the block index.
 			node := new(blockNode)
 			initBlockNode(node, header, parent)
+			node.BuildAncestor()
 			node.status = status
 			b.index.addNode(node)
 
@@ -1634,7 +1637,7 @@ func (b *BlockChain) FlushMemBlockStore() error {
 		return err
 	}
 	err = b.db.Update(func(dbTx database.Tx) error {
-		log.Infof("Flushing block %x", b.memBlocks.blocks.Hash())
+		log.Infof("Flushing block %v", b.memBlocks.blocks.Hash())
 		err := dbTx.StoreBlock(b.memBlocks.blocks)
 		if err != nil {
 			return err
@@ -1667,7 +1670,7 @@ func (b *BlockChain) PutUtreexoView() error {
 	b.utreexoQuit = true
 
 	err := b.db.Update(func(dbTx database.Tx) error {
-		log.Infof("STORE Utreexo roots at block %x", *b.memBlocks.blocks.Hash())
+		log.Infof("STORE Utreexo roots at block %v", *b.memBlocks.blocks.Hash())
 		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlocks.blocks.Hash())
 		//for i := 0; i < len(b.memBlocks.blocks); i++ {
 		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
