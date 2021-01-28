@@ -793,26 +793,11 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 				return err
 			}
 
-			//if block.Height() == 119058 {
-			//	fmt.Println("height:", ud.Height)
-			//	fmt.Println("AccProof targets:", len(ud.AccProof.Targets))
-			//	fmt.Println("AccProof hashes:", len(ud.AccProof.Proof))
-			//	fmt.Println("Stxos:", len(ud.Stxos))
-			//	fmt.Println("TxoTTLs:", len(ud.TxoTTLs))
-			//	panic("just quit")
-			//}
 			err = b.proofFileState.flatFileStoreAccProof(*ud)
 			if err != nil {
 				return err
 			}
 		}
-
-		//ttls := FetchTTL(dbTx, 383, block.Hash())
-		//for _, ttl := range ttls {
-		//	if ttl != nil {
-		//		fmt.Printf("TTL for height:%v, ssindex:%v, TTL:%v\n", ttl.Height, ttl.Index, ttl.TTL)
-		//	}
-		//}
 
 		// Allow the index manager to call each of the currently active
 		// optional indexes with the block being connected so they can
@@ -872,12 +857,6 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) erro
 		}
 	}
 
-	//// Write any block status changes to DB before updating best state.
-	//err := b.index.flushToDB()
-	//if err != nil {
-	//	return err
-	//}
-
 	// Generate a new best state snapshot that will be used to update the
 	// database and later memory if all database updates are successful.
 	b.stateLock.RLock()
@@ -889,70 +868,9 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) erro
 	state := newBestState(node, blockSize, blockWeight, numTxns,
 		curTotalTxns+numTxns, node.CalcPastMedianTime())
 
-	// Atomically insert info into the database.
-	//err = b.db.Update(func(dbTx database.Tx) error {
-	//if state.Hash != *ublock.Hash() {
-	//	s := fmt.Errorf("state hash %v, ublock hash %v", state.Hash, ublock.Hash())
-	//	panic(s)
-	//}
-	//fmt.Printf("state hash %v, ublock hash %v\n", state.Hash, ublock.Hash())
-	// Update best block state.
-	//err := dbPutBestState(dbTx, state, node.workSum)
-	//if err != nil {
-	//	return err
-	//}
-
 	b.memBestState.state = state
 	b.memBestState.workSum = node.workSum
 	b.memBlock.StoreBlock(ublock.Block())
-
-	//// Add the block hash and height to the block index which tracks
-	//// the main chain.
-	//err = dbPutBlockIndex(dbTx, ublock.Hash(), node.height)
-	//if err != nil {
-	//	return err
-	//}
-
-	// Update the utxo set using the state of the utxo view.  This
-	// entails removing all of the utxos spent and adding the new
-	// ones created by the block.
-	//err = dbPutUtxoView(dbTx, view)
-	//if err != nil {
-	//	return err
-	//}
-
-	//err = b.utreexoViewpoint.Modify(ublock)
-	//if err != nil {
-	//	return err
-	//}
-
-	//err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, *ublock.Hash())
-	//if err != nil {
-	//	return err
-	//}
-
-	// Update the transaction spend journal by adding a record for
-	// the block that contains all txos spent by it.
-	//err = dbPutSpendJournalEntry(dbTx, ublock.Hash(), stxos)
-	//if err != nil {
-	//	return err
-	//}
-
-	//// Allow the index manager to call each of the currently active
-	//// optional indexes with the block being connected so they can
-	//// update themselves accordingly.
-	//if b.indexManager != nil {
-	//	err := b.indexManager.ConnectBlock(dbTx, ublock.Block(), stxos)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-
-	//return nil
-	//})
-	//if err != nil {
-	//	return err
-	//}
 
 	// This node is now the end of the best chain.
 	b.bestChain.SetTip(node)
@@ -1110,23 +1028,6 @@ func countDedupedStxos(block *btcutil.Block) int {
 
 	// iterate through the transactions in a block
 	for txIdx, tx := range block.Transactions() {
-		// for all the txouts, get their outpoint & index and throw that into
-		// a db batch
-		//for _, txo := range tx.MsgTx().TxOut {
-		//	if len(outskip) > 0 && txOutForBlock == int(outskip[0]) {
-		//		// skip inputs in the txin skiplist
-		//		outskip = outskip[1:]
-		//		txOutForBlock++
-		//		continue
-		//	}
-		//	if isUnspendable(txo) {
-		//		txOutForBlock++
-		//		continue
-		//	}
-
-		//	txOutForBlock++
-		//}
-
 		// for all the txins, throw that into the work as well; just a bunch of
 		// outpoints
 		for i := 0; i < len(tx.MsgTx().TxIn); i++ { // bit of a tounge twister
@@ -1137,7 +1038,6 @@ func countDedupedStxos(block *btcutil.Block) int {
 			if len(inskip) > 0 && txInForBlock == int(inskip[0]) {
 				// skip inputs in the txin skiplist
 				inskip = inskip[1:]
-				//txInForBlock++
 				continue
 			}
 
@@ -1571,17 +1471,6 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
 	fastAdd := flags&BFFastAdd == BFFastAdd
 
-	//flushIndexState := func() {
-	//	// Intentionally ignore errors writing updated node status to DB. If
-	//	// it fails to write, it's not the end of the world. If the block is
-	//	// valid, we flush in connectBlock and if the block is invalid, the
-	//	// worst that can happen is we revalidate the block after a restart.
-	//	if writeErr := b.index.flushToDB(); writeErr != nil {
-	//		log.Warnf("Error flushing block index changes to disk: %v",
-	//			writeErr)
-	//	}
-	//}
-
 	// We are extending the main (best) chain with a new block.  This is the
 	// most common case.
 	parentHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
@@ -1603,8 +1492,6 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 			} else {
 				return false, err
 			}
-
-			//flushIndexState()
 
 			if err != nil {
 				return false, err
@@ -1635,8 +1522,6 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 				b.index.SetStatusFlags(node, statusValidateFailed)
 			}
 
-			//flushIndexState()
-
 			return false, err
 		}
 
@@ -1645,7 +1530,6 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 		// disk again.
 		if fastAdd || !b.index.NodeStatus(node).KnownValid() {
 			b.index.SetStatusFlags(node, statusValid)
-			//flushIndexState()
 		}
 
 		return true, nil

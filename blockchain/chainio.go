@@ -408,9 +408,7 @@ func putSpentTxOut(target []byte, stxo *SpentTxOut) int {
 		// so this is required for backwards compat.
 		offset += putVLQ(target[offset:], 0)
 	}
-	//if stxo.Index != 0 {
-	//	fmt.Println("PUTTING STXOINDEX:", stxo.Index)
-	//}
+
 	offset += putVLQ(target[offset:], uint64(stxo.Index))
 	offset += putVLQ(target[offset:], uint64(stxo.TTL))
 
@@ -1138,34 +1136,6 @@ func serializeBestState(snapshot *BestState) ([]byte, error) {
 	return serialized, nil
 }
 
-//func deserializeBestState(serializedData []byte) (*BestState, error) {
-//	// Ensure the serialized data has enough bytes to properly deserialize
-//	// the hash, height, total transactions, and work sum length.
-//	if len(serializedData) < chainhash.HashSize+16 {
-//		return bestChainState{}, database.Error{
-//			ErrorCode:   database.ErrCorruption,
-//			Description: "corrupt best state",
-//		}
-//	}
-//	return nil, nil
-//}
-
-func dbPutActualBestState(dbTx, snapshot *BestState) error {
-	return nil
-}
-
-//func dbGetActualBestState(dbTx database.Tx) (*BestState, error) {
-//	serialized := dbTx.Metadata().Get(chainStateKeyName)
-//	bestChainState, err := deserializeBestChainState(serialized)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	bestState := BestState{}
-//
-//	return bestState, nil
-//}
-
 // createChainState initializes both the database and the chain state to the
 // genesis block.  This includes creating the necessary buckets and inserting
 // the genesis block, so it must only be called on an uninitialized database.
@@ -1603,12 +1573,6 @@ type memBlockStore struct {
 // StoreBlock keeps 12 blocks in memory in a fifo structure
 func (mbs *memBlockStore) StoreBlock(block *btcutil.Block) {
 	mbs.block = block
-	//mbs.blocks = append(mbs.blocks, block)
-
-	//// 12 is the max blocks to keep on memory
-	//if len(mbs.blocks) > 12 {
-	//	mbs.blocks = mbs.blocks[1:]
-	//}
 }
 
 // FetchBlock returns the block thats stored in memory. Returns nil if the block
@@ -1617,11 +1581,6 @@ func (mbs *memBlockStore) FetchBlock(hash *chainhash.Hash) *btcutil.Block {
 	if mbs.block.Hash() == hash {
 		return mbs.block
 	}
-	//for i := 0; i < len(mbs.blocks); i++ {
-	//	if mbs.blocks[i].Hash() == hash {
-	//		return mbs.blocks[i]
-	//	}
-	//}
 
 	return nil
 }
@@ -1647,13 +1606,6 @@ func (b *BlockChain) FlushMemBlockStore() error {
 		if err != nil {
 			return err
 		}
-		//for i := 0; i < len(b.memBlocks.blocks); i++ {
-		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
-		//	if err != nil {
-		//		return err
-		//	}
-		//}
-		//return nil
 		return nil
 	})
 	if err != nil {
@@ -1672,13 +1624,6 @@ func (b *BlockChain) PutUtreexoView() error {
 	err := b.db.Update(func(dbTx database.Tx) error {
 		log.Infof("STORE Utreexo roots at block %v", *b.memBlock.block.Hash())
 		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlock.block.Hash())
-		//for i := 0; i < len(b.memBlocks.blocks); i++ {
-		//	err := dbTx.StoreBlock(b.memBlocks.blocks[i])
-		//	if err != nil {
-		//		return err
-		//	}
-		//}
-		//return nil
 	})
 	if err != nil {
 		return err
@@ -1687,27 +1632,11 @@ func (b *BlockChain) PutUtreexoView() error {
 	return nil
 }
 
-//func (b *BlockChain) RestoreMemBlockStore() {
-//}
-
-//func dbStoreAccProof(dbTx database.Tx, hash *chainhash.Hash, accProof *accumulator.BatchProof) error {
-//	hasAccProof, err := dbTx.HasAccProof(hash)
-//	if err != nil {
-//		return err
-//	}
-//	if hasAccProof {
-//		return nil
-//	}
-//	return dbTx.StoreAccProof(accProof, hash)
-//}
-
 type ProofFileState struct {
 	basePath      string
 	currentOffset int64
-	//proofFile, offsetFile *bufio.Writer
-	proofState  proofFiler
-	offsetState offsetFiler
-	//fileWait              *sync.WaitGroup
+	proofState    proofFiler
+	offsetState   offsetFiler
 }
 
 type proofFiler struct {
@@ -1733,7 +1662,6 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	pf.basePath = path
 
 	proofFilePath := filepath.Join(path, "proof.dat")
-	//proofFile, err := os.Open(proofFilePath)
 	proofFile, err := os.OpenFile(proofFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
@@ -1744,7 +1672,6 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	}
 
 	offsetFilePath := filepath.Join(path, "offset.dat")
-	//offsetFile, err := os.Open(offsetFilePath)
 	offsetFile, err := os.OpenFile(offsetFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
@@ -1769,7 +1696,7 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	proofFilePath := filepath.Join(path, "proof.dat")
 	proofFile, err := os.OpenFile(proofFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	pf.proofState = proofFiler{
 		file:    proofFile,
@@ -1779,7 +1706,7 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	offsetFilePath := filepath.Join(path, "offset.dat")
 	offsetFile, err := os.OpenFile(offsetFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	pf.offsetState = offsetFiler{
 		file:    offsetFile,
@@ -1787,25 +1714,13 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	}
 	_, err = pf.offsetState.file.Write(make([]byte, 8))
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	return nil
 }
 
 func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
-	//if len(ud.Stxos) == 0 {
-	//	fmt.Println("ud height:", ud.Height)
-	//	fmt.Println("ud accproof:", ud.AccProof)
-	//	fmt.Println("ud stxos:", ud.Stxos)
-	//	fmt.Println("ud txottl:", ud.TxoTTLs)
-	//	fmt.Println()
-	//}
-	//// note that we know the offset for block 2 once we're done writing block 1,
-	//// but we don't write the block 2 offset until we get block 2
-
-	//// fmt.Printf("writeProofBlock gets h %d ud %d utxodatas\n",
-	//// ud.Height, len(ud.Stxos))
 	udSize := ud.SerializeSize()
 
 	//// get the new block proof
@@ -1835,7 +1750,6 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 		return err
 	}
 
-	//fmt.Println("ud", ud)
 	// then write the whole proof
 	err = ud.Serialize(pf.proofState.file)
 	if err != nil {
@@ -2020,17 +1934,13 @@ func dbStoreTTLForBlock(dbTx database.Tx, hash *chainhash.Hash, block *btcutil.B
 // at block 21 will have a ttl of 16.
 type TTL struct {
 	Height int32 // height of the block that created the tx
-	//outpoint wire.OutPoint
-	Index int16 // index of "spendable and not a same block spend" stxos
-	TTL   int32 // time-to-live value
+	Index  int16 // index of "spendable and not a same block spend" stxos
+	TTL    int32 // time-to-live value
 }
 
 func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	serializedCount := ttlBucket.Get(hash[:])
-
-	//count, _ := deserializeVLQ(serializedCount)
-	//ttls := make([]TTL, count)
 
 	count := byteOrder.Uint32(serializedCount[:])
 	ttls := make([]*TTL, count)
@@ -2050,23 +1960,19 @@ func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 			Index:  int16(i),
 			TTL:    int32(byteOrder.Uint32(serialized)),
 		}
-		//ttl.ttl = int32(byteOrder.Uint32(serialized))
 		ttls[i] = &ttl
 	}
 
 	return ttls
 }
 
-func FetchOnlyTTL(dbTx database.Tx, hash *chainhash.Hash) []int32 {
+func FetchOnlyTTL(dbTx database.Tx, hash *chainhash.Hash) ([]int32, error) {
 	height, err := dbFetchHeightByHash(dbTx, hash)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	serializedCount := ttlBucket.Get(hash[:])
-
-	//count, _ := deserializeVLQ(serializedCount)
-	//ttls := make([]TTL, count)
 
 	count := byteOrder.Uint32(serializedCount[:])
 	ttls := make([]int32, count)
@@ -2084,33 +1990,14 @@ func FetchOnlyTTL(dbTx database.Tx, hash *chainhash.Hash) []int32 {
 		ttls[i] = int32(byteOrder.Uint32(serialized))
 	}
 
-	return ttls
+	return ttls, nil
 }
-
-//func FetchTxoTTL(dbTx database.Tx, height int32, ssindex int16) *TTL {
-//	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
-//
-//	//var key [6]byte
-//	//byteOrder.PutUint32(key[:4], uint32(height))
-//	//byteOrder.PutUint16(key[4:], uint16(ssindex)
-//
-//	//serialized := ttlBucket.Get(key[:])
-//	return nil
-//}
 
 func dbPutTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash, count int32) error {
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
-	//fmt.Println("ttlBucket", ttlBucket)
-
-	//size := serializeSizeVLQ(uint64(count))
-	//countBytes := make([]byte, size)
-	//putVLQ(countBytes, uint64(count))
-
 	var value [4]byte
 	byteOrder.PutUint32(value[:], uint32(count))
 
-	//fmt.Println("hash", hash)
-	//fmt.Println("value", value)
 	return ttlBucket.Put(hash[:], value[:])
 }
 
@@ -2120,19 +2007,6 @@ func dbRemoveTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash) error {
 }
 
 func dbPutTTL(dbTx database.Tx, ttl TTL) error {
-	//keySize := serializeSizeVLQ(uint64(ttl.height))
-	//keySize += serializeSizeVLQ(uint64(ttl.index))
-
-	//key := make([]byte, keySize)
-
-	//offset := putVLQ(key, uint64(ttl.height))
-	//offset += putVLQ(key[offset:], uint64(ttl.index))
-
-	//valueSize := serializeSizeVLQ(uint64(ttl.ttl))
-
-	//value := make([]byte, valueSize)
-	//putVLQ(value, uint64(ttl.ttl))
-
 	var key [6]byte
 
 	byteOrder.PutUint32(key[:4], uint32(ttl.Height))
@@ -2146,14 +2020,6 @@ func dbPutTTL(dbTx database.Tx, ttl TTL) error {
 }
 
 func dbRemoveTTL(dbTx database.Tx, height int32, index int16) error {
-	//keySize := serializeSizeVLQ(uint64(height))
-	//keySize += serializeSizeVLQ(uint64(index))
-
-	//key := make([]byte, keySize)
-
-	//offset := putVLQ(key, uint64(height))
-	//offset += putVLQ(key[offset:], uint64(index))
-
 	var serialized [6]byte
 
 	byteOrder.PutUint32(serialized[:4], uint32(height))

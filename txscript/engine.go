@@ -364,66 +364,6 @@ func isOpcodeConditional(opcode byte) bool {
 	}
 }
 
-//// checkMinimalDataPush returns whether or not the current data push uses the
-//// smallest possible opcode to represent it.  For example, the value 15 could
-//// be pushed with OP_DATA_1 15 (among other variations); however, OP_15 is a
-//// single opcode that represents the same value and is only a single byte versus
-//// two bytes.
-//func checkMinimalDataPush(op *opcode, data []byte) error {
-//	opcode := op.value
-//	dataLen := len(data)
-//
-//	if dataLen == 0 && op.value != OP_0 {
-//		str := fmt.Sprintf("zero length data push is encoded with "+
-//			"opcode %s instead of OP_0", op.name)
-//		//panic(str)
-//		return scriptError(ErrMinimalData, str)
-//	} else if dataLen == 1 && data[0] >= 1 && data[0] <= 16 {
-//		if opcode != OP_1+data[0]-1 {
-//			// Should have used OP_1 .. OP_16
-//			str := fmt.Sprintf("data push of the value %d encoded "+
-//				"with opcode %s instead of OP_%d", data[0],
-//				op.name, data[0])
-//			//panic(str)
-//			return scriptError(ErrMinimalData, str)
-//		}
-//	} else if dataLen == 1 && data[0] == 0x81 {
-//		if opcode != OP_1NEGATE {
-//			str := fmt.Sprintf("data push of the value -1 encoded "+
-//				"with opcode %s instead of OP_1NEGATE",
-//				op.name)
-//			//panic(str)
-//			return scriptError(ErrMinimalData, str)
-//		}
-//	} else if dataLen <= 75 {
-//		if int(opcode) != dataLen {
-//			// Should have used a direct push
-//			str := fmt.Sprintf("data push of %d bytes encoded "+
-//				"with opcode %s instead of OP_DATA_%d", dataLen,
-//				op.name, dataLen)
-//			//panic(str)
-//			return scriptError(ErrMinimalData, str)
-//		}
-//	} else if dataLen <= 255 {
-//		if opcode != OP_PUSHDATA1 {
-//			str := fmt.Sprintf("data push of %d bytes encoded "+
-//				"with opcode %s instead of OP_PUSHDATA1",
-//				dataLen, op.name)
-//			//panic(str)
-//			return scriptError(ErrMinimalData, str)
-//		}
-//	} else if dataLen <= 65535 {
-//		if opcode != OP_PUSHDATA2 {
-//			str := fmt.Sprintf("data push of %d bytes encoded "+
-//				"with opcode %s instead of OP_PUSHDATA2",
-//				dataLen, op.name)
-//			//panic(str)
-//			return scriptError(ErrMinimalData, str)
-//		}
-//	}
-//	return nil
-//}
-
 // checkMinimalDataPush returns whether or not the provided opcode is the
 // smallest possible way to represent the given data.  For example, the value 15
 // could be pushed with OP_DATA_1 15 (among other variations); however, OP_15 is
@@ -473,58 +413,6 @@ func checkMinimalDataPush(op *opcode, data []byte) error {
 	return nil
 }
 
-//// executeOpcode peforms execution on the passed opcode.  It takes into account
-//// whether or not it is hidden by conditionals, but some rules still must be
-//// tested in this case.
-//func (vm *Engine) executeOpcode(pop *parsedOpcode) error {
-//	// Disabled opcodes are fail on program counter.
-//	if pop.isDisabled() {
-//		str := fmt.Sprintf("attempt to execute disabled opcode %s",
-//			pop.opcode.name)
-//		return scriptError(ErrDisabledOpcode, str)
-//	}
-//
-//	// Always-illegal opcodes are fail on program counter.
-//	if pop.alwaysIllegal() {
-//		str := fmt.Sprintf("attempt to execute reserved opcode %s",
-//			pop.opcode.name)
-//		return scriptError(ErrReservedOpcode, str)
-//	}
-//
-//	// Note that this includes OP_RESERVED which counts as a push operation.
-//	if pop.opcode.value > OP_16 {
-//		vm.numOps++
-//		if vm.numOps > MaxOpsPerScript {
-//			str := fmt.Sprintf("exceeded max operation limit of %d",
-//				MaxOpsPerScript)
-//			return scriptError(ErrTooManyOperations, str)
-//		}
-//
-//	} else if len(pop.data) > MaxScriptElementSize {
-//		str := fmt.Sprintf("element size %d exceeds max allowed size %d",
-//			len(pop.data), MaxScriptElementSize)
-//		return scriptError(ErrElementTooBig, str)
-//	}
-//
-//	// Nothing left to do when this is not a conditional opcode and it is
-//	// not in an executing branch.
-//	if !vm.isBranchExecuting() && !pop.isConditional() {
-//		return nil
-//	}
-//
-//	// Ensure all executed data push opcodes use the minimal encoding when
-//	// the minimal data verification flag is set.
-//	if vm.dstack.verifyMinimalData && vm.isBranchExecuting() &&
-//		pop.opcode.value >= 0 && pop.opcode.value <= OP_PUSHDATA4 {
-//
-//		if err := pop.checkMinimalDataPush(); err != nil {
-//			return err
-//		}
-//	}
-//
-//	return pop.opcode.opfunc(pop, vm)
-//}
-
 // executeOpcode performs execution on the passed opcode.  It takes into account
 // whether or not it is hidden by conditionals, but some rules still must be
 // tested in this case.
@@ -572,42 +460,6 @@ func (vm *Engine) executeOpcode(op *opcode, data []byte) error {
 	return op.opfunc(op, data, vm)
 }
 
-//// disasm is a helper function to produce the output for DisasmPC and
-//// DisasmScript.  It produces the opcode prefixed by the program counter at the
-//// provided position in the script.  It does no error checking and leaves that
-//// to the caller to provide a valid offset.
-//func (vm *Engine) disasm(scriptIdx int, scriptOff int) string {
-//	return fmt.Sprintf("%02x:%04x: %s", scriptIdx, scriptOff,
-//		vm.scripts[scriptIdx][scriptOff].print(false))
-//}
-
-//// validPC returns an error if the current script position is valid for
-//// execution, nil otherwise.
-//func (vm *Engine) validPC() error {
-//	if vm.scriptIdx >= len(vm.scripts) {
-//		str := fmt.Sprintf("past input scripts %v:%v %v:xxxx",
-//			vm.scriptIdx, vm.scriptOff, len(vm.scripts))
-//		return scriptError(ErrInvalidProgramCounter, str)
-//	}
-//	if vm.scriptOff >= len(vm.scripts[vm.scriptIdx]) {
-//		str := fmt.Sprintf("past input scripts %v:%v %v:%04d",
-//			vm.scriptIdx, vm.scriptOff, vm.scriptIdx,
-//			len(vm.scripts[vm.scriptIdx]))
-//		return scriptError(ErrInvalidProgramCounter, str)
-//	}
-//	return nil
-//}
-
-//// curPC returns either the current script and offset, or an error if the
-//// position isn't valid.
-//func (vm *Engine) curPC() (script int, off int, err error) {
-//	err = vm.validPC()
-//	if err != nil {
-//		return 0, 0, err
-//	}
-//	return vm.scriptIdx, vm.scriptOff, nil
-//}
-
 // isWitnessVersionActive returns true if a witness program was extracted
 // during the initialization of the Engine, and the program's version matches
 // the specified version.
@@ -639,21 +491,11 @@ func (vm *Engine) verifyWitnessProgram(witness [][]byte) error {
 			if err := checkScriptParses(pkScript); err != nil {
 				return err
 			}
+			// Set the stack to the provided witness stack, then
+			// append the pkScript generated above as the next
+			// script to execute.
 			vm.scripts = append(vm.scripts, pkScript)
 			vm.SetStack(witness)
-			//pops, err := parseScript(pkScript)
-			//if err != nil {
-			//	return err
-			//}
-
-			//// Set the stack to the provided witness stack, then
-			//// append the pkScript generated above as the next
-			//// script to execute.
-			//vm.scripts = append(vm.scripts, pops)
-
-			// Obtain the redeem script from the first stack and ensure it
-			// parses.
-			//script := vm.savedFirstStack[len(vm.savedFirstStack)-1]
 
 		case payToWitnessScriptHashDataSize: // P2WSH
 			// Additionally, The witness stack MUST NOT be empty at
@@ -682,22 +524,6 @@ func (vm *Engine) verifyWitnessProgram(witness [][]byte) error {
 					"witness program hash mismatch")
 			}
 
-			//// With all the validity checks passed, parse the
-			//// script into individual op-codes so w can execute it
-			//// as the next script.
-			//pops, err := parseScript(witnessScript)
-			//if err != nil {
-			//	return err
-			//}
-
-			//// The hash matched successfully, so use the witness as
-			//// the stack, and set the witnessScript to be the next
-			//// script executed.
-			//vm.scripts = append(vm.scripts, pops)
-
-			// Obtain the redeem script from the first stack and ensure it
-			// parses.
-			//script := vm.savedFirstStack[len(vm.savedFirstStack)-1]
 			if err := checkScriptParses(witnessScript); err != nil {
 				return err
 			}
@@ -740,16 +566,6 @@ func (vm *Engine) verifyWitnessProgram(witness [][]byte) error {
 
 	return nil
 }
-
-//// DisasmPC returns the string for the disassembly of the opcode that will be
-//// next to execute when Step() is called.
-//func (vm *Engine) DisasmPC() (string, error) {
-//	scriptIdx, scriptOff, err := vm.curPC()
-//	if err != nil {
-//		return "", err
-//	}
-//	return vm.disasm(scriptIdx, scriptOff), nil
-//}
 
 // checkValidPC returns an error if the current script position is not valid for
 // execution.
@@ -808,40 +624,6 @@ func (vm *Engine) DisasmPC() (string, error) {
 		buf.String()), nil
 }
 
-//// validPC returns an error if the current script position is valid for
-//// execution, nil otherwise.
-//func (vm *Engine) validPC() error {
-//	if vm.scriptIdx >= len(vm.scripts) {
-//		str := fmt.Sprintf("past input scripts %v:%v %v:xxxx",
-//			vm.scriptIdx, vm.scriptOff, len(vm.scripts))
-//		return scriptError(ErrInvalidProgramCounter, str)
-//	}
-//	if vm.scriptOff >= len(vm.scripts[vm.scriptIdx]) {
-//		str := fmt.Sprintf("past input scripts %v:%v %v:%04d",
-//			vm.scriptIdx, vm.scriptOff, vm.scriptIdx,
-//			len(vm.scripts[vm.scriptIdx]))
-//		return scriptError(ErrInvalidProgramCounter, str)
-//	}
-//	return nil
-//}
-
-//// DisasmScript returns the disassembly string for the script at the requested
-//// offset index.  Index 0 is the signature script and 1 is the public key
-//// script.
-//func (vm *Engine) DisasmScript(idx int) (string, error) {
-//	if idx >= len(vm.scripts) {
-//		str := fmt.Sprintf("script index %d >= total scripts %d", idx,
-//			len(vm.scripts))
-//		return "", scriptError(ErrInvalidIndex, str)
-//	}
-//
-//	var disstr string
-//	for i := range vm.scripts[idx] {
-//		disstr = disstr + vm.disasm(idx, i) + "\n"
-//	}
-//	return disstr, nil
-//}
-
 // DisasmScript returns the disassembly string for the script at the requested
 // offset index.  Index 0 is the signature script and 1 is the public key
 // script.  In the case of pay-to-script-hash, index 2 is the redeem script once
@@ -866,54 +648,6 @@ func (vm *Engine) DisasmScript(idx int) (string, error) {
 	}
 	return disbuf.String(), tokenizer.Err()
 }
-
-//// CheckErrorCondition returns nil if the running script has ended and was
-//// successful, leaving a a true boolean on the stack.  An error otherwise,
-//// including if the script has not finished.
-//func (vm *Engine) CheckErrorCondition(finalScript bool) error {
-//	// Check execution is actually done.  When pc is past the end of script
-//	// array there are no more scripts to run.
-//	if vm.scriptIdx < len(vm.scripts) {
-//		return scriptError(ErrScriptUnfinished,
-//			"error check when script unfinished")
-//	}
-//
-//	// If we're in version zero witness execution mode, and this was the
-//	// final script, then the stack MUST be clean in order to maintain
-//	// compatibility with BIP16.
-//	if finalScript && vm.isWitnessVersionActive(0) && vm.dstack.Depth() != 1 {
-//		return scriptError(ErrEvalFalse, "witness program must "+
-//			"have clean stack")
-//	}
-//
-//	if finalScript && vm.hasFlag(ScriptVerifyCleanStack) &&
-//		vm.dstack.Depth() != 1 {
-//
-//		str := fmt.Sprintf("stack contains %d unexpected items",
-//			vm.dstack.Depth()-1)
-//		return scriptError(ErrCleanStack, str)
-//	} else if vm.dstack.Depth() < 1 {
-//		return scriptError(ErrEmptyStack,
-//			"stack empty at end of script execution")
-//	}
-//
-//	v, err := vm.dstack.PopBool()
-//	if err != nil {
-//		return err
-//	}
-//	if !v {
-//		// Log interesting data.
-//		log.Tracef("%v", newLogClosure(func() string {
-//			dis0, _ := vm.DisasmScript(0)
-//			dis1, _ := vm.DisasmScript(1)
-//			return fmt.Sprintf("scripts failed: script0: %s\n"+
-//				"script1: %s", dis0, dis1)
-//		}))
-//		return scriptError(ErrEvalFalse,
-//			"false stack entry at end of script execution")
-//	}
-//	return nil
-//}
 
 // CheckErrorCondition returns nil if the running script has ended and was
 // successful, leaving a true boolean on the stack.  An error otherwise,
@@ -968,225 +702,6 @@ func (vm *Engine) CheckErrorCondition(finalScript bool) error {
 	return nil
 }
 
-//// Step will execute the next instruction and move the program counter to the
-//// next opcode in the script, or the next script if the current has ended.  Step
-//// will return true in the case that the last opcode was successfully executed.
-////
-//// The result of calling Step or any other method is undefined if an error is
-//// returned.
-//func (vm *Engine) Step() (done bool, err error) {
-//	// Verify that it is pointing to a valid script address.
-//	err = vm.validPC()
-//	if err != nil {
-//		return true, err
-//	}
-//	opcode := &vm.scripts[vm.scriptIdx][vm.scriptOff]
-//	vm.scriptOff++
-//
-//	// Execute the opcode while taking into account several things such as
-//	// disabled opcodes, illegal opcodes, maximum allowed operations per
-//	// script, maximum script element sizes, and conditionals.
-//	err = vm.executeOpcode(opcode)
-//	if err != nil {
-//		return true, err
-//	}
-//
-//	// The number of elements in the combination of the data and alt stacks
-//	// must not exceed the maximum number of stack elements allowed.
-//	combinedStackSize := vm.dstack.Depth() + vm.astack.Depth()
-//	if combinedStackSize > MaxStackSize {
-//		str := fmt.Sprintf("combined stack size %d > max allowed %d",
-//			combinedStackSize, MaxStackSize)
-//		return false, scriptError(ErrStackOverflow, str)
-//	}
-//
-//	// Prepare for next instruction.
-//	if vm.scriptOff >= len(vm.scripts[vm.scriptIdx]) {
-//		// Illegal to have an `if' that straddles two scripts.
-//		if err == nil && len(vm.condStack) != 0 {
-//			return false, scriptError(ErrUnbalancedConditional,
-//				"end of script reached in conditional execution")
-//		}
-//
-//		// Alt stack doesn't persist.
-//		_ = vm.astack.DropN(vm.astack.Depth())
-//
-//		vm.numOps = 0 // number of ops is per script.
-//		vm.scriptOff = 0
-//		if vm.scriptIdx == 0 && vm.bip16 {
-//			vm.scriptIdx++
-//			vm.savedFirstStack = vm.GetStack()
-//		} else if vm.scriptIdx == 1 && vm.bip16 {
-//			// Put us past the end for CheckErrorCondition()
-//			vm.scriptIdx++
-//			// Check script ran successfully and pull the script
-//			// out of the first stack and execute that.
-//			err := vm.CheckErrorCondition(false)
-//			if err != nil {
-//				return false, err
-//			}
-//
-//			script := vm.savedFirstStack[len(vm.savedFirstStack)-1]
-//			pops, err := parseScript(script)
-//			if err != nil {
-//				return false, err
-//			}
-//			vm.scripts = append(vm.scripts, pops)
-//
-//			// Set stack to be the stack from first script minus the
-//			// script itself
-//			vm.SetStack(vm.savedFirstStack[:len(vm.savedFirstStack)-1])
-//		} else if (vm.scriptIdx == 1 && vm.witnessProgram != nil) ||
-//			(vm.scriptIdx == 2 && vm.witnessProgram != nil && vm.bip16) { // Nested P2SH.
-//
-//			vm.scriptIdx++
-//
-//			witness := vm.tx.TxIn[vm.txIdx].Witness
-//			if err := vm.verifyWitnessProgram(witness); err != nil {
-//				return false, err
-//			}
-//		} else {
-//			vm.scriptIdx++
-//		}
-//		// there are zero length scripts in the wild
-//		if vm.scriptIdx < len(vm.scripts) && vm.scriptOff >= len(vm.scripts[vm.scriptIdx]) {
-//			vm.scriptIdx++
-//		}
-//		vm.lastCodeSep = 0
-//		if vm.scriptIdx >= len(vm.scripts) {
-//			return true, nil
-//		}
-//	}
-//	return false, nil
-//}
-
-//// Step executes the next instruction and moves the program counter to the next
-//// opcode in the script, or the next script if the current has ended.  Step will
-//// return true in the case that the last opcode was successfully executed.
-////
-//// The result of calling Step or any other method is undefined if an error is
-//// returned.
-//func (vm *Engine) Step() (done bool, err error) {
-//	// Verify the engine is pointing to a valid program counter.
-//	if err := vm.checkValidPC(); err != nil {
-//		return true, err
-//	}
-//
-//	// Attempt to parse the next opcode from the current script.
-//	if !vm.tokenizer.Next() {
-//		// Note that due to the fact that all scripts are checked for parse
-//		// failures before this code ever runs, there should never be an error
-//		// here, but check again to be safe in case a refactor breaks that
-//		// assumption or new script versions are introduced with different
-//		// semantics.
-//		if err := vm.tokenizer.Err(); err != nil {
-//			return false, err
-//		}
-//
-//		str := fmt.Sprintf("attempt to step beyond script index %d (bytes %x)",
-//			vm.scriptIdx, vm.scripts[vm.scriptIdx])
-//		//panic(str)
-//		return true, scriptError(ErrInvalidProgramCounter, str)
-//	}
-//
-//	fmt.Println(vm.tokenizer.Opcode())
-//
-//	// Execute the opcode while taking into account several things such as
-//	// disabled opcodes, illegal opcodes, maximum allowed operations per script,
-//	// maximum script element sizes, and conditionals.
-//	err = vm.executeOpcode(vm.tokenizer.op, vm.tokenizer.Data())
-//	if err != nil {
-//		return true, err
-//	}
-//
-//	// The number of elements in the combination of the data and alt stacks
-//	// must not exceed the maximum number of stack elements allowed.
-//	combinedStackSize := vm.dstack.Depth() + vm.astack.Depth()
-//	if combinedStackSize > MaxStackSize {
-//		str := fmt.Sprintf("combined stack size %d > max allowed %d",
-//			combinedStackSize, MaxStackSize)
-//		return false, scriptError(ErrStackOverflow, str)
-//	}
-//
-//	// Prepare for next instruction.
-//	vm.opcodeIdx++
-//	if vm.tokenizer.Done() {
-//		// Illegal to have a conditional that straddles two scripts.
-//		if vm.condNestDepth != 0 {
-//			return false, scriptError(ErrUnbalancedConditional,
-//				"end of script reached in conditional execution")
-//		}
-//
-//		// Alt stack doesn't persist between scripts.
-//		_ = vm.astack.DropN(vm.astack.Depth())
-//
-//		// The number of operations is per script.
-//		vm.numOps = 0
-//
-//		// Reset the opcode index for the next script.
-//		vm.opcodeIdx = 0
-//
-//		// Advance to the next script as needed.
-//		switch {
-//		case vm.scriptIdx == 0 && vm.bip16:
-//			vm.scriptIdx++
-//			vm.savedFirstStack = vm.GetStack()
-//
-//		case vm.scriptIdx == 1 && vm.bip16:
-//			// Put us past the end for CheckErrorCondition()
-//			vm.scriptIdx++
-//			// Check script ran successfully and pull the script
-//			// out of the first stack and execute that.
-//			err := vm.CheckErrorCondition(false)
-//			if err != nil {
-//				return false, err
-//			}
-//
-//			// Obtain the redeem script from the first stack and ensure it
-//			// parses.
-//			script := vm.savedFirstStack[len(vm.savedFirstStack)-1]
-//			if err := checkScriptParses(script); err != nil {
-//				return false, err
-//			}
-//			vm.scripts = append(vm.scripts, script)
-//
-//			// Set stack to be the stack from first script minus the
-//			// script itself
-//			vm.SetStack(vm.savedFirstStack[:len(vm.savedFirstStack)-1])
-//
-//		case vm.scriptIdx == 1 && vm.witnessProgram != nil ||
-//			(vm.scriptIdx == 2 && vm.witnessProgram != nil && vm.bip16): // Nested P2SH.
-//
-//			vm.scriptIdx++
-//
-//			witness := vm.tx.TxIn[vm.txIdx].Witness
-//			if err := vm.verifyWitnessProgram(witness); err != nil {
-//				return false, err
-//			}
-//
-//		default:
-//			vm.scriptIdx++
-//		}
-//
-//		// Skip empty scripts.
-//		if vm.scriptIdx < len(vm.scripts) && len(vm.scripts[vm.scriptIdx]) == 0 {
-//			vm.scriptIdx++
-//		}
-//
-//		vm.lastCodeSep = 0
-//		if vm.scriptIdx >= len(vm.scripts) {
-//			return true, nil
-//		}
-//
-//		// Finally, update the current tokenizer used to parse through scripts
-//		// one opcode at a time to start from the beginning of the new script
-//		// associated with the program counter.
-//		vm.tokenizer = MakeScriptTokenizer(vm.scripts[vm.scriptIdx])
-//	}
-//
-//	return false, nil
-//}
-
 // Step executes the next instruction and moves the program counter to the next
 // opcode in the script, or the next script if the current has ended.  Step will
 // return true in the case that the last opcode was successfully executed.
@@ -1196,7 +711,6 @@ func (vm *Engine) CheckErrorCondition(finalScript bool) error {
 func (vm *Engine) Step() (done bool, err error) {
 	// Verify the engine is pointing to a valid program counter.
 	if err := vm.checkValidPC(); err != nil {
-		//panic(err)
 		return true, err
 	}
 
@@ -1208,13 +722,11 @@ func (vm *Engine) Step() (done bool, err error) {
 		// assumption or new script versions are introduced with different
 		// semantics.
 		if err := vm.tokenizer.Err(); err != nil {
-			//panic(err)
 			return false, err
 		}
 
 		str := fmt.Sprintf("attempt to step beyond script index %d (bytes %x)",
 			vm.scriptIdx, vm.scripts[vm.scriptIdx])
-		//panic("heasdfre")
 		return true, scriptError(ErrInvalidProgramCounter, str)
 	}
 	vm.opcodeIdx++
@@ -1226,7 +738,6 @@ func (vm *Engine) Step() (done bool, err error) {
 	// maximum script element sizes, and conditionals.
 	err = vm.executeOpcode(vm.tokenizer.op, vm.tokenizer.Data())
 	if err != nil {
-		//panic(err)
 		return true, err
 	}
 
@@ -1269,7 +780,6 @@ func (vm *Engine) Step() (done bool, err error) {
 			// Check script ran successfully.
 			err := vm.CheckErrorCondition(false)
 			if err != nil {
-				//panic(err)
 				return false, err
 			}
 
@@ -1277,7 +787,6 @@ func (vm *Engine) Step() (done bool, err error) {
 			// parses.
 			script := vm.savedFirstStack[len(vm.savedFirstStack)-1]
 			if err := checkScriptParses(script); err != nil {
-				//panic(err)
 				return false, err
 			}
 			vm.scripts = append(vm.scripts, script)
@@ -1293,7 +802,6 @@ func (vm *Engine) Step() (done bool, err error) {
 
 			witness := vm.tx.TxIn[vm.txIdx].Witness
 			if err := vm.verifyWitnessProgram(witness); err != nil {
-				//panic(err)
 				return false, err
 			}
 
@@ -1328,7 +836,6 @@ func (vm *Engine) Execute() (err error) {
 		log.Tracef("%v", newLogClosure(func() string {
 			dis, err := vm.DisasmPC()
 			if err != nil {
-				//panic(err)
 				return fmt.Sprintf("stepping (%v)", err)
 			}
 			return fmt.Sprintf("stepping %v", dis)
@@ -1336,7 +843,6 @@ func (vm *Engine) Execute() (err error) {
 
 		done, err = vm.Step()
 		if err != nil {
-			//panic(err)
 			return err
 		}
 		log.Tracef("%v", newLogClosure(func() string {
@@ -1357,26 +863,19 @@ func (vm *Engine) Execute() (err error) {
 	return vm.CheckErrorCondition(true)
 }
 
-//// subScript returns the script since the last OP_CODESEPARATOR.
-//func (vm *Engine) subScript() []parsedOpcode {
-//	return vm.scripts[vm.scriptIdx][vm.lastCodeSep:]
-//}
-
 // subScript returns the script since the last OP_CODESEPARATOR.
 func (vm *Engine) subScript() []byte {
 	return vm.scripts[vm.scriptIdx][vm.lastCodeSep:]
 }
 
-// isPubKeyEncoding returns whether or not the passed public key adheres
-// to the strict encoding requirements.
+// isPubKeyEncoding returns whether or not the passed pubkey is a pubkey
 func isPubKeyEncoding(pubKey []byte) bool {
-	if len(pubKey) == 33 { //&& (pubKey[0] == 0x02 || pubKey[0] == 0x03) {
-		// Compressed
+	// Compressed
+	if len(pubKey) == 33 {
 		return true
 	}
-	if len(pubKey) == 65 { //&& pubKey[0] == 0x04 {
-		// Compressed
-		// Uncompressed
+	// Uncompressed
+	if len(pubKey) == 65 {
 		return true
 	}
 
@@ -1412,12 +911,12 @@ func (vm *Engine) checkPubKeyEncoding(pubKey []byte) error {
 		return nil
 	}
 
+	// Compressed
 	if len(pubKey) == 33 && (pubKey[0] == 0x02 || pubKey[0] == 0x03) {
-		// Compressed
 		return nil
 	}
+	// Uncompressed
 	if len(pubKey) == 65 && pubKey[0] == 0x04 {
-		// Uncompressed
 		return nil
 	}
 
@@ -1667,160 +1166,6 @@ func (vm *Engine) SetAltStack(data [][]byte) {
 	setStack(&vm.astack, data)
 }
 
-//// NewEngine returns a new script engine for the provided public key script,
-//// transaction, and input index.  The flags modify the behavior of the script
-//// engine according to the description provided by each flag.
-//func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags,
-//	sigCache *SigCache, hashCache *TxSigHashes, inputAmount int64) (*Engine, error) {
-//
-//	// The provided transaction input index must refer to a valid input.
-//	if txIdx < 0 || txIdx >= len(tx.TxIn) {
-//		str := fmt.Sprintf("transaction input index %d is negative or "+
-//			">= %d", txIdx, len(tx.TxIn))
-//		return nil, scriptError(ErrInvalidIndex, str)
-//	}
-//	scriptSig := tx.TxIn[txIdx].SignatureScript
-//
-//	// When both the signature script and public key script are empty the
-//	// result is necessarily an error since the stack would end up being
-//	// empty which is equivalent to a false top element.  Thus, just return
-//	// the relevant error now as an optimization.
-//	if len(scriptSig) == 0 && len(scriptPubKey) == 0 {
-//		return nil, scriptError(ErrEvalFalse,
-//			"false stack entry at end of script execution")
-//	}
-//
-//	// The clean stack flag (ScriptVerifyCleanStack) is not allowed without
-//	// either the pay-to-script-hash (P2SH) evaluation (ScriptBip16)
-//	// flag or the Segregated Witness (ScriptVerifyWitness) flag.
-//	//
-//	// Recall that evaluating a P2SH script without the flag set results in
-//	// non-P2SH evaluation which leaves the P2SH inputs on the stack.
-//	// Thus, allowing the clean stack flag without the P2SH flag would make
-//	// it possible to have a situation where P2SH would not be a soft fork
-//	// when it should be. The same goes for segwit which will pull in
-//	// additional scripts for execution from the witness stack.
-//	vm := Engine{flags: flags, sigCache: sigCache, hashCache: hashCache,
-//		inputAmount: inputAmount}
-//	if vm.hasFlag(ScriptVerifyCleanStack) && (!vm.hasFlag(ScriptBip16) &&
-//		!vm.hasFlag(ScriptVerifyWitness)) {
-//		return nil, scriptError(ErrInvalidFlags,
-//			"invalid flags combination")
-//	}
-//
-//	// The signature script must only contain data pushes when the
-//	// associated flag is set.
-//	if vm.hasFlag(ScriptVerifySigPushOnly) && !IsPushOnlyScript(scriptSig) {
-//		return nil, scriptError(ErrNotPushOnly,
-//			"signature script is not push only")
-//	}
-//
-//	// The engine stores the scripts in parsed form using a slice.  This
-//	// allows multiple scripts to be executed in sequence.  For example,
-//	// with a pay-to-script-hash transaction, there will be ultimately be
-//	// a third script to execute.
-//	scripts := [][]byte{scriptSig, scriptPubKey}
-//	vm.scripts = make([][]parsedOpcode, len(scripts))
-//	for i, scr := range scripts {
-//		if len(scr) > MaxScriptSize {
-//			str := fmt.Sprintf("script size %d is larger than max "+
-//				"allowed size %d", len(scr), MaxScriptSize)
-//			return nil, scriptError(ErrScriptTooBig, str)
-//		}
-//		var err error
-//		vm.scripts[i], err = parseScript(scr)
-//		if err != nil {
-//			return nil, err
-//		}
-//	}
-//
-//	// Advance the program counter to the public key script if the signature
-//	// script is empty since there is nothing to execute for it in that
-//	// case.
-//	if len(scripts[0]) == 0 {
-//		vm.scriptIdx++
-//	}
-//
-//	if vm.hasFlag(ScriptBip16) && isScriptHash(vm.scripts[1]) {
-//		// Only accept input scripts that push data for P2SH.
-//		if !isPushOnly(vm.scripts[0]) {
-//			return nil, scriptError(ErrNotPushOnly,
-//				"pay to script hash is not push only")
-//		}
-//		vm.bip16 = true
-//	}
-//	if vm.hasFlag(ScriptVerifyMinimalData) {
-//		vm.dstack.verifyMinimalData = true
-//		vm.astack.verifyMinimalData = true
-//	}
-//
-//	// Check to see if we should execute in witness verification mode
-//	// according to the set flags. We check both the pkScript, and sigScript
-//	// here since in the case of nested p2sh, the scriptSig will be a valid
-//	// witness program. For nested p2sh, all the bytes after the first data
-//	// push should *exactly* match the witness program template.
-//	if vm.hasFlag(ScriptVerifyWitness) {
-//		// If witness evaluation is enabled, then P2SH MUST also be
-//		// active.
-//		if !vm.hasFlag(ScriptBip16) {
-//			errStr := "P2SH must be enabled to do witness verification"
-//			return nil, scriptError(ErrInvalidFlags, errStr)
-//		}
-//
-//		var witProgram []byte
-//
-//		switch {
-//		case isWitnessProgram(vm.scripts[1]):
-//			// The scriptSig must be *empty* for all native witness
-//			// programs, otherwise we introduce malleability.
-//			if len(scriptSig) != 0 {
-//				errStr := "native witness program cannot " +
-//					"also have a signature script"
-//				return nil, scriptError(ErrWitnessMalleated, errStr)
-//			}
-//
-//			witProgram = scriptPubKey
-//		case len(tx.TxIn[txIdx].Witness) != 0 && vm.bip16:
-//			// The sigScript MUST be *exactly* a single canonical
-//			// data push of the witness program, otherwise we
-//			// reintroduce malleability.
-//			sigPops := vm.scripts[0]
-//			if len(sigPops) == 1 && canonicalPush(sigPops[0]) &&
-//				IsWitnessProgram(sigPops[0].data) {
-//
-//				witProgram = sigPops[0].data
-//			} else {
-//				errStr := "signature script for witness " +
-//					"nested p2sh is not canonical"
-//				return nil, scriptError(ErrWitnessMalleatedP2SH, errStr)
-//			}
-//		}
-//
-//		if witProgram != nil {
-//			var err error
-//			vm.witnessVersion, vm.witnessProgram, err = ExtractWitnessProgramInfo(witProgram)
-//			if err != nil {
-//				return nil, err
-//			}
-//		} else {
-//			// If we didn't find a witness program in either the
-//			// pkScript or as a datapush within the sigScript, then
-//			// there MUST NOT be any witness data associated with
-//			// the input being validated.
-//			if vm.witnessProgram == nil && len(tx.TxIn[txIdx].Witness) != 0 {
-//				errStr := "non-witness inputs cannot have a witness"
-//				return nil, scriptError(ErrWitnessUnexpected, errStr)
-//			}
-//		}
-//
-//	}
-//
-//	vm.tx = *tx
-//	vm.txIdx = txIdx
-//
-//	return &vm, nil
-//}
-
 // NewEngine returns a new script engine for the provided public key script,
 // transaction, and input index.  The flags modify the behavior of the script
 // engine according to the description provided by each flag.
@@ -1842,15 +1187,6 @@ func NewEngine(scriptPubKey []byte, tx *wire.MsgTx, txIdx int, flags ScriptFlags
 		return nil, scriptError(ErrEvalFalse,
 			"false stack entry at end of script execution")
 	}
-
-	//// The signature script must only contain data pushes when the associated
-	//// flag is set.
-	//vm := Engine{flags: flags, sigCache: sigCache, hashCache: hashCache,
-	//	inputAmount: inputAmount}
-	//if vm.hasFlag(ScriptVerifySigPushOnly) && !IsPushOnlyScript(scriptSig) {
-	//	return nil, scriptError(ErrNotPushOnly,
-	//		"signature script is not push only")
-	//}
 
 	// The clean stack flag (ScriptVerifyCleanStack) is not allowed without
 	// either the pay-to-script-hash (P2SH) evaluation (ScriptBip16)

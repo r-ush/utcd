@@ -1729,9 +1729,15 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 
 	var ttls []int32
 	err = sp.server.db.View(func(dbTx database.Tx) error {
-		ttls = blockchain.FetchOnlyTTL(dbTx, hash)
+		ttls, err = blockchain.FetchOnlyTTL(dbTx, hash)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 	ud.TxoTTLs = ttls
 
 	ublock := wire.MsgUBlock{

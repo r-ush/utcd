@@ -5,8 +5,6 @@
 package blockchain
 
 import (
-	"fmt"
-
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
 	"github.com/mit-dci/utreexo/btcacc"
@@ -14,20 +12,7 @@ import (
 
 type UtreexoViewpoint struct {
 	accumulator accumulator.Pollard
-	//bestHash    chainhash.Hash
 }
-
-//// BestHash returns the hash of the best block in the chain the view currently
-//// respresents.
-//func (uview *UtreexoViewpoint) BestHash() *chainhash.Hash {
-//	return &uview.bestHash
-//}
-
-//// SetBestHash sets the hash of the best block in the chain the view currently
-//// respresents.
-//func (uview *UtreexoViewpoint) SetBestHash(hash *chainhash.Hash) {
-//	uview.bestHash = *hash
-//}
 
 // Modify takes an ublock and adds the utxos and deletes the stxos from the utreexo state
 func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
@@ -119,10 +104,7 @@ func UBlockToStxos(ublock *btcutil.UBlock, stxos *[]SpentTxOut) error {
 
 	_, outskip := ublock.Block().DedupeBlock()
 
-	shouldadd := len(outskip)
-
 	var txonum uint32
-	var added int
 	for coinbaseif0, tx := range ublock.Block().MsgBlock().Transactions {
 		for _, txOut := range tx.TxOut {
 			// Skip all the OP_RETURNs
@@ -142,23 +124,16 @@ func UBlockToStxos(ublock *btcutil.UBlock, stxos *[]SpentTxOut) error {
 				*stxos = append(*stxos, stxo)
 				outskip = outskip[1:]
 				txonum++
-				added++
 				continue
 			}
 			txonum++
 		}
-	}
-	if added != shouldadd {
-		s := fmt.Errorf("should add %v but only added %v. txonum final:%v", shouldadd, added, txonum)
-		//fmt.Println(s)
-		panic(s)
 	}
 	return nil
 }
 
 func NewUtreexoViewpoint() *UtreexoViewpoint {
 	return &UtreexoViewpoint{
-		//entries:     make(map[chainhash.Hash]*btcacc.LeafData),
 		accumulator: accumulator.Pollard{},
 	}
 }
