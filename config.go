@@ -701,6 +701,38 @@ func loadConfig() (*config, []string, error) {
 		}
 	}
 
+	if !cfg.UtreexoCSN {
+		fmt.Println("This binary only supports utreexoCSN mode." +
+			"Please run again with the flag --utreexocsn")
+		err := fmt.Errorf("")
+		return nil, nil, err
+	}
+
+	// NOTE: this is here for the utcd csn release
+	if cfg.UtreexoCSN {
+		fmt.Println("In utreexoCSN mode." +
+			"setting flag --connect to designated nodes")
+		if cfg.TestNet3 {
+			cfg.ConnectPeers = []string{
+				"34.105.121.136", // mit-dci midwest-US
+			}
+		} else {
+			cfg.ConnectPeers = []string{
+				"103.99.170.215", // wiz     japan
+				"35.188.186.244", // mit-dci midwest-US
+				"35.204.135.228", // mit-dci Europe
+			}
+		}
+
+		if cfg.RegressionTest || cfg.SimNet {
+			fmt.Println("This binary only supports utreexoCSN mode in" +
+				"testnet or mainnet. For regtest or simnet, please" +
+				"modify&build from the source code")
+			err := fmt.Errorf("")
+			return nil, nil, err
+		}
+	}
+
 	// --addPeer and --connect do not mix.
 	if len(cfg.AddPeers) > 0 && len(cfg.ConnectPeers) > 0 {
 		str := "%s: the --addpeer and --connect options can not be " +
