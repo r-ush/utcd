@@ -24,10 +24,13 @@ const (
 	lookahead = 1000
 )
 
+// UtreexoBridgeState is the utreexo accumulator state for the bridgenode
 type UtreexoBridgeState struct {
 	forest *accumulator.Forest
 }
 
+// NewUtreexoBridgeState returns a utreexo accumulator state in ram
+// TODO: support on disk options
 func NewUtreexoBridgeState() *UtreexoBridgeState {
 	// Default to ram for now
 	return &UtreexoBridgeState{
@@ -35,6 +38,8 @@ func NewUtreexoBridgeState() *UtreexoBridgeState {
 	}
 }
 
+// RestoreUtreexoBridgeState reads the utreexo bridgestate files on disk and returns
+// the initialized UtreexoBridgeState.
 func RestoreUtreexoBridgeState(utreexoBSPath string) (*UtreexoBridgeState, error) {
 	miscPath := filepath.Join(utreexoBSPath, "miscforestfile.dat")
 	miscFile, err := os.Open(miscPath)
@@ -54,6 +59,8 @@ func RestoreUtreexoBridgeState(utreexoBSPath string) (*UtreexoBridgeState, error
 	return &UtreexoBridgeState{forest: f}, nil
 }
 
+// WriteUtreexoBridgeState flushes the current in-ram UtreexoBridgeState to disk.
+// This function is meant to be called during shutdown.
 func (b *BlockChain) WriteUtreexoBridgeState(utreexoBSPath string) error {
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
@@ -86,9 +93,14 @@ func (b *BlockChain) WriteUtreexoBridgeState(utreexoBSPath string) error {
 		return err
 	}
 
+	log.Infof("Gracefully wrote the UtreexoBridgeState to the disk")
+
 	return nil
 }
 
+// UpdateUtreexoBS takes in a non-utreexo Bitcoin block and adds/deletes the txos
+// from the passed in block from the UtreexoBridgeState. It returns a utreexo proof
+// so that utreexocsns can verify.
 func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (*btcacc.UData, error) {
 	if block.Height() == 0 {
 		return nil, nil
@@ -105,19 +117,6 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	if err != nil {
 		return nil, err
 	}
-	//if block.Height() == 54503 {
-	//	if len(adds) != 1 {
-	//		s := fmt.Errorf("block 54503 len adds is not 1 but %v. Hash is %v", len(adds), block.Hash())
-	//		panic(s)
-	//	}
-	//}
-	//ud.TxoTTLs = make([]int32, len(adds))
-	//	fmt.Println("ud height:", ud.Height)
-	//	fmt.Println("ud ttl len:", len(ud.TxoTTLs))
-	//	fmt.Println("ud stxos len:", len(ud.Stxos))
-	//	fmt.Println("ud accProof len:", len(ud.AccProof.Proof))
-	//if len(ud.Stxos) != 0 {
-	//}
 
 	// TODO don't ignore undoblock
 	_, err = b.UtreexoBS.forest.Modify(adds, ud.AccProof.Targets)
@@ -128,6 +127,8 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 	return &ud, nil
 }
 
+// blockToDelLeaves takes a non-utreexo block and stxos and turns the block into
+// leaves that are to be deleted from the UtreexoBridgeState.
 func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32) (delLeaves []btcacc.LeafData, err error) {
 	var blockInputs int
 	var blockInIdx uint32
@@ -167,6 +168,7 @@ func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32)
 		}
 	}
 
+	// just an assertion to check the code is correct. Should never happen
 	if blockInputs != len(stxos) {
 		return nil, fmt.Errorf(
 			"block height: %v, hash:%x, has %v txs but %v stxos",
@@ -176,9 +178,8 @@ func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32)
 	return
 }
 
-// blockToAdds turns all the new utxos in a msgblock into leafTxos
-// uses remember slice up to number of txos, but doesn't check that it's the
-// right length.  Similar with skiplist, doesn't check it.
+// blockToAddLeaves takes a non-utreexo block and stxos and turns the block into
+// leaves that are to be added to the UtreexoBridgeState.
 func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (leaves []accumulator.Leaf) {
 	var txonum uint32
 	for coinbase, tx := range block.Transactions() {
@@ -188,11 +189,7 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 				txonum++
 				continue
 			}
-			//if block.Height() == 54503 {
-			//	fmt.Println("unspendable?", txscript.IsUnspendable(txOut.PkScript))
-			//	fmt.Println("utreexo func?:", isUnspendable(txOut))
-			//	fmt.Printf("script: %x\n", txOut.PkScript)
-			//}
+
 			// Skip txos on the skip list
 			if len(outskip) > 0 && outskip[0] == txonum {
 				outskip = outskip[1:]
@@ -226,15 +223,17 @@ func blockToAddLeaves(block *btcutil.Block, remember []bool, outskip []uint32) (
 	return
 }
 
-//isUnspendable determines whether a tx is spendable or not.
-//returns true if spendable, false if unspendable.
+// isUnspendable determines whether a tx is spendable or not.
+// returns true if spendable, false if unspendable.
+//
+// NOTE: for utreexo, we're keeping our own isUnspendable function that has the
+// same behavior as the bitcoind code. There are some utxos that btcd will mark
+// unspendable that bitcoind will not and vise versa.
 func isUnspendable(o *wire.TxOut) bool {
 	switch {
 	case len(o.PkScript) > 10000: //len 0 is OK, spendable
-		//fmt.Println("Unspendable reason: PkScript longer than 10,000")
 		return true
 	case len(o.PkScript) > 0 && o.PkScript[0] == 0x6a: // OP_RETURN is 0x6a
-		//fmt.Println("Unspendable reason: PkScript 0x6a")
 		return true
 	default:
 		return false

@@ -188,19 +188,21 @@ func deserializeUtreexoView(uView *UtreexoViewpoint, serializedUView []byte) err
 	return nil
 }
 
-func dbPutUtreexoView(dbTx database.Tx, uView *UtreexoViewpoint, blockHash chainhash.Hash) error {
+func dbPutUtreexoView(dbTx database.Tx, uView *UtreexoViewpoint, blockHash chainhash.Hash) (int32, error) {
 	utreexoBucket := dbTx.Metadata().Bucket(utreexoCSBucketName)
 	serialized, err := serializeUtreexoView(uView)
 	if err != nil {
-		return err
+		return 0, err
 	}
+
+	utreexoSize := int32(len(serialized))
 
 	err = utreexoBucket.Put([]byte(blockHash[:]), serialized)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return utreexoSize, nil
 }
 
 func dbFetchUtreexoView(dbTx database.Tx, blockHash chainhash.Hash) (*UtreexoViewpoint, error) {
@@ -1229,6 +1231,7 @@ func (b *BlockChain) createChainState() error {
 			return err
 		}
 
+		// There are some extra data that needs to be created for utreexo CSNs
 		if b.utreexoCSN {
 			b.utreexoViewpoint = NewUtreexoViewpoint()
 			_, err = meta.CreateBucket(utreexoCSBucketName)
@@ -1236,7 +1239,7 @@ func (b *BlockChain) createChainState() error {
 				return err
 			}
 
-			err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, node.hash)
+			_, err = dbPutUtreexoView(dbTx, b.utreexoViewpoint, node.hash)
 			if err != nil {
 				return err
 			}
@@ -1246,6 +1249,8 @@ func (b *BlockChain) createChainState() error {
 			}
 		}
 
+		// There are some extra data that needs to be created for utreexo bridge
+		// nodes.
 		if b.utreexo {
 			b.UtreexoBS = NewUtreexoBridgeState()
 			b.proofFileState = NewProofFileState()
@@ -1543,12 +1548,14 @@ func dbStoreBlock(dbTx database.Tx, block *btcutil.Block) error {
 	return dbTx.StoreBlock(block)
 }
 
+// memBestState is the best state kept in memory. This should only be used for Utreexo
+// CSNs.
 type memBestState struct {
 	state   *BestState
 	workSum *big.Int
-	//snapshot []byte
 }
 
+// FlushMemBestState stores the best state kept in memory during shutdown.
 func (b *BlockChain) FlushMemBestState() error {
 	err := b.db.Update(func(dbTx database.Tx) error {
 		// Update best block state.
@@ -1566,11 +1573,14 @@ func (b *BlockChain) FlushMemBestState() error {
 	return nil
 }
 
+// memBlockStore is a single block kept in memory for pow and other consensus checking.
+// This should only be used for the Utreexo CSNs
 type memBlockStore struct {
 	block *btcutil.Block
 }
 
-// StoreBlock keeps 12 blocks in memory in a fifo structure
+// StoreBlock replaces the old block that was kept in memory with the new block passed
+// in.
 func (mbs *memBlockStore) StoreBlock(block *btcutil.Block) {
 	mbs.block = block
 }
@@ -1585,6 +1595,8 @@ func (mbs *memBlockStore) FetchBlock(hash *chainhash.Hash) *btcutil.Block {
 	return nil
 }
 
+// FlushMemBlockStore stores the block index and the single block that was kept in
+// memory during the shutdown.
 func (b *BlockChain) FlushMemBlockStore() error {
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
@@ -1615,15 +1627,24 @@ func (b *BlockChain) FlushMemBlockStore() error {
 	return nil
 }
 
+// PutUtreexoView stores the utreexoViewpoint into the database and prints the size
+// of the chainstate in bytes. This function is meant to be called when the node is
+// shutting down.
 func (b *BlockChain) PutUtreexoView() error {
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 
+	// utreexoQuit tells the chain to stop processing more blocks
 	b.utreexoQuit = true
 
 	err := b.db.Update(func(dbTx database.Tx) error {
-		log.Infof("STORE Utreexo roots at block %v", *b.memBlock.block.Hash())
-		return dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlock.block.Hash())
+		size, err := dbPutUtreexoView(dbTx, b.utreexoViewpoint, *b.memBlock.block.Hash())
+		log.Infof("Storing Utreexo roots at block %v. Utreexo roots/chainstate is %v bytes",
+			*b.memBlock.block.Hash(), size)
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -1632,6 +1653,7 @@ func (b *BlockChain) PutUtreexoView() error {
 	return nil
 }
 
+// ProofFileState is all the utreexo proofs for the entire chain.
 type ProofFileState struct {
 	basePath      string
 	currentOffset int64
@@ -1639,20 +1661,28 @@ type ProofFileState struct {
 	offsetState   offsetFiler
 }
 
+// proofFiler is just the prooffile with a rw lock. Mimics the filer
+// found in database/
 type proofFiler struct {
 	rwMutex sync.RWMutex
 	file    *os.File
 }
 
+// offsetFiler is just the offsetfile with a rw lock. Mimics the filer
+// found in database/
 type offsetFiler struct {
 	rwMutex sync.RWMutex
 	file    *os.File
 }
 
+// NewProofFileState returns a empty ProofFileState
 func NewProofFileState() *ProofFileState {
 	return &ProofFileState{}
 }
 
+// InitProofFileState attempts to load and initialize the proof file from
+// the disk. When the proof files don't yet exist, it creates it and initializes
+// to the gensis block.
 func (pf *ProofFileState) InitProofFileState(path string) error {
 	// Check and make directory if it doesn't exist
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -1662,7 +1692,7 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	pf.basePath = path
 
 	proofFilePath := filepath.Join(path, "proof.dat")
-	proofFile, err := os.OpenFile(proofFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	proofFile, err := os.OpenFile(proofFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -1672,7 +1702,7 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	}
 
 	offsetFilePath := filepath.Join(path, "offset.dat")
-	offsetFile, err := os.OpenFile(offsetFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	offsetFile, err := os.OpenFile(offsetFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -1689,12 +1719,14 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 	return nil
 }
 
+// createFlatFileState creates the prooffile and the offsetfile on disk
+// Meant to be called when a node is freshly started
 func (pf *ProofFileState) createFlatFileState(path string) error {
 	os.MkdirAll(path, 0700)
 	pf.basePath = path
 
 	proofFilePath := filepath.Join(path, "proof.dat")
-	proofFile, err := os.OpenFile(proofFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	proofFile, err := os.OpenFile(proofFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -1704,7 +1736,7 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	}
 
 	offsetFilePath := filepath.Join(path, "offset.dat")
-	offsetFile, err := os.OpenFile(offsetFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	offsetFile, err := os.OpenFile(offsetFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -1712,6 +1744,7 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 		file:    offsetFile,
 		rwMutex: sync.RWMutex{},
 	}
+	// write 0s for the genesis block
 	_, err = pf.offsetState.file.Write(make([]byte, 8))
 	if err != nil {
 		return err
@@ -1720,52 +1753,57 @@ func (pf *ProofFileState) createFlatFileState(path string) error {
 	return nil
 }
 
+// flatFileStoreAccProof takes a UData, and stores it in the flat file.
+// the offset for which is proof exists in the flat file is stored in the
+// offsetfile.
+//
+// This function MUST be called with the chain state lock held (for writes).
 func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
+	// pre-allocated the needed buffer
 	udSize := ud.SerializeSize()
+	buf := make([]byte, udSize)
 
-	//// get the new block proof
-	//// put offset in ram
+	// write write the offset of the current proof to the offset file
 	pf.offsetState.rwMutex.Lock()
-	_, err := pf.offsetState.file.Seek(int64(8*ud.Height), 0)
-	err = binary.Write(pf.offsetState.file, binary.BigEndian, pf.currentOffset)
+	buf = buf[:8]
+	binary.BigEndian.PutUint64(buf, uint64(pf.currentOffset))
+	_, err := pf.offsetState.file.WriteAt(buf, int64(8*ud.Height))
 	if err != nil {
 		return err
 	}
 	pf.offsetState.rwMutex.Unlock()
 
 	// write to proof file
-	// first write magic 4 bytes
-	// seek to next block proof location, this file is open in ttl worker
-	// and may write point may have moved
 	pf.proofState.rwMutex.Lock()
-	_, _ = pf.proofState.file.Seek(pf.currentOffset, 0)
-	_, err = pf.proofState.file.Write([]byte{0xaa, 0xff, 0xaa, 0xff})
+	_, err = pf.proofState.file.WriteAt([]byte{0xaa, 0xff, 0xaa, 0xff}, pf.currentOffset)
 	if err != nil {
 		return err
 	}
 
 	// prefix with size
-	err = binary.Write(pf.proofState.file, binary.BigEndian, uint32(udSize))
+	buf = buf[:4]
+	binary.BigEndian.PutUint32(buf, uint32(udSize))
+	// +4 to account for the 4 magic bytes
+	_, err = pf.proofState.file.WriteAt(buf, pf.currentOffset+4)
 	if err != nil {
 		return err
 	}
 
-	// then write the whole proof
-	err = ud.Serialize(pf.proofState.file)
+	// Serialize proof
+	buf = buf[:0]
+	bytesBuf := bytes.NewBuffer(buf)
+	err = ud.Serialize(bytesBuf)
 	if err != nil {
 		return err
 	}
 
-	// verify that offset is calculated correctly
-	off, err := pf.proofState.file.Seek(0, 1)
+	// Write to the file
+	// +4 +4 to account for the 4 magic bytes and the 4 size bytes
+	_, err = pf.proofState.file.WriteAt(bytesBuf.Bytes(), pf.currentOffset+4+4)
 	if err != nil {
 		return err
 	}
-	if off != pf.currentOffset+int64(udSize)+8 {
-		return fmt.Errorf("h %d offset %x calculated length %d but observed %d",
-			ud.Height, pf.currentOffset,
-			int64(ud.SerializeSize())+8, off-pf.currentOffset)
-	}
+
 	pf.proofState.rwMutex.Unlock()
 
 	// 4B magic & 4B size comes first
@@ -1774,6 +1812,9 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 	return nil
 }
 
+// FetchProof, given a block hash, will return the udata associated with that block
+//
+// This function is safe for concurrent access.
 func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 	var height int32
 	err := b.db.View(func(dbTx database.Tx) error {
@@ -1788,26 +1829,25 @@ func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 		return nil, err
 	}
 
-	b.proofFileState.offsetState.rwMutex.RLock()
-	_, err = b.proofFileState.offsetState.file.Seek(int64(8*height), 0)
-	if err != nil {
-		return nil, err
-	}
+	// pre-allocate buf
+	buf := make([]byte, 8)
 
-	offsetBuf := make([]byte, 8)
-	_, err = b.proofFileState.offsetState.file.ReadAt(offsetBuf, int64(8*height))
+	// First read the offset of where the proof is in the offsetfile
+	b.proofFileState.offsetState.rwMutex.RLock()
+	_, err = b.proofFileState.offsetState.file.ReadAt(buf, int64(8*height))
 	if err != nil {
 		return nil, err
 	}
 	b.proofFileState.offsetState.rwMutex.RUnlock()
 
-	offset := binary.BigEndian.Uint64(offsetBuf)
+	offset := binary.BigEndian.Uint64(buf)
 	if err != nil {
 		return nil, err
 	}
 
+	// Then read the actual proof from the prooffile and deserialize
 	b.proofFileState.proofState.rwMutex.RLock()
-	buf := make([]byte, 4)
+	buf = buf[:4]
 	_, err = b.proofFileState.proofState.file.ReadAt(buf, int64(offset))
 	if err != nil {
 		return nil, err
@@ -1938,6 +1978,7 @@ type TTL struct {
 	TTL    int32 // time-to-live value
 }
 
+// FetchTTL returns the TTL struct given the block hash and height
 func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	serializedCount := ttlBucket.Get(hash[:])
@@ -1966,6 +2007,7 @@ func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 	return ttls
 }
 
+// FetchOnlyTTL only fetches the slice of int32 without other data
 func FetchOnlyTTL(dbTx database.Tx, hash *chainhash.Hash) ([]int32, error) {
 	height, err := dbFetchHeightByHash(dbTx, hash)
 	if err != nil {
@@ -1993,6 +2035,8 @@ func FetchOnlyTTL(dbTx database.Tx, hash *chainhash.Hash) ([]int32, error) {
 	return ttls, nil
 }
 
+// dbPutTTLCountForBlock stores how many ttls there are for a given block. This data
+// is used during ttl fetches for a block.
 func dbPutTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash, count int32) error {
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	var value [4]byte
@@ -2001,11 +2045,13 @@ func dbPutTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash, count int32) e
 	return ttlBucket.Put(hash[:], value[:])
 }
 
+// dbRemoveTTLCountForBlock removes the ttl count for a block
 func dbRemoveTTLCountForBlock(dbTx database.Tx, hash chainhash.Hash) error {
 	ttlBucket := dbTx.Metadata().Bucket(txoTTLBucketName)
 	return ttlBucket.Delete(hash[:])
 }
 
+// dbPutTTL stores the TTL in the database.
 func dbPutTTL(dbTx database.Tx, ttl TTL) error {
 	var key [6]byte
 
@@ -2019,6 +2065,7 @@ func dbPutTTL(dbTx database.Tx, ttl TTL) error {
 	return ttlBucket.Put(key[:], value[:])
 }
 
+// dbRemoveTTL removes a TTL from the database.
 func dbRemoveTTL(dbTx database.Tx, height int32, index int16) error {
 	var serialized [6]byte
 

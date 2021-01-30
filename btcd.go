@@ -16,7 +16,6 @@ import (
 	"runtime/pprof"
 	"runtime/trace"
 
-	"github.com/btcsuite/btcd/blockchain/indexers"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/limits"
 )
@@ -105,43 +104,9 @@ func btcdMain(serverChan chan<- *server) error {
 		btcdLog.Errorf("%v", err)
 		return err
 	}
-	defer func() {
-		// Ensure the database is sync'd and closed on shutdown.
-		btcdLog.Infof("Gracefully shutting down the database...")
-		db.Close()
-	}()
 
 	// Return now if an interrupt signal was triggered.
 	if interruptRequested(interrupt) {
-		return nil
-	}
-
-	// Drop indexes and exit if requested.
-	//
-	// NOTE: The order is important here because dropping the tx index also
-	// drops the address index since it relies on it.
-	if cfg.DropAddrIndex {
-		if err := indexers.DropAddrIndex(db, interrupt); err != nil {
-			btcdLog.Errorf("%v", err)
-			return err
-		}
-
-		return nil
-	}
-	if cfg.DropTxIndex {
-		if err := indexers.DropTxIndex(db, interrupt); err != nil {
-			btcdLog.Errorf("%v", err)
-			return err
-		}
-
-		return nil
-	}
-	if cfg.DropCfIndex {
-		if err := indexers.DropCfIndex(db, interrupt); err != nil {
-			btcdLog.Errorf("%v", err)
-			return err
-		}
-
 		return nil
 	}
 
@@ -154,6 +119,40 @@ func btcdMain(serverChan chan<- *server) error {
 			cfg.Listeners, err)
 		return err
 	}
+
+	defer func() error {
+		// Ensure the database is sync'd and closed on shutdown.
+		btcdLog.Infof("Gracefully shutting down the database...")
+		db.Close()
+
+		if cfg.Utreexo {
+			// TODO add saving the utreexo proofs and forest here
+			err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
+			if err != nil {
+				return err
+			}
+		}
+
+		if cfg.UtreexoCSN {
+			err = server.chain.FlushMemBlockStore()
+			if err != nil {
+				return err
+			}
+
+			err = server.chain.FlushMemBestState()
+			if err != nil {
+				return err
+			}
+
+			err = server.chain.PutUtreexoView()
+
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}()
+
 	defer func() {
 		btcdLog.Infof("Gracefully shutting down the server...")
 		server.Stop()
@@ -165,41 +164,40 @@ func btcdMain(serverChan chan<- *server) error {
 		serverChan <- server
 	}
 
+	// NOTE: for the utreexo release, these aren't supported so it's fine to ignore these
+	// Drop indexes and exit if requested.
+	//
+	// NOTE: The order is important here because dropping the tx index also
+	// drops the address index since it relies on it.
+	//if cfg.DropAddrIndex {
+	//	if err := indexers.DropAddrIndex(db, interrupt); err != nil {
+	//		btcdLog.Errorf("%v", err)
+	//		return err
+	//	}
+
+	//	return nil
+	//}
+	//if cfg.DropTxIndex {
+	//	if err := indexers.DropTxIndex(db, interrupt); err != nil {
+	//		btcdLog.Errorf("%v", err)
+	//		return err
+	//	}
+
+	//	return nil
+	//}
+	//if cfg.DropCfIndex {
+	//	if err := indexers.DropCfIndex(db, interrupt); err != nil {
+	//		btcdLog.Errorf("%v", err)
+	//		return err
+	//	}
+
+	//	return nil
+	//}
+
 	// Wait until the interrupt signal is received from an OS signal or
 	// shutdown is requested through one of the subsystems such as the RPC
 	// server.
 	<-interrupt
-
-	//err = server.chain.FlushProofFileState()
-	//if err != nil {
-	//	return err
-	//}
-
-	if cfg.Utreexo {
-		// TODO add saving the utreexo proofs and forest here
-		err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
-		if err != nil {
-			return err
-		}
-	}
-
-	if cfg.UtreexoCSN {
-		err = server.chain.FlushMemBlockStore()
-		if err != nil {
-			return err
-		}
-
-		err = server.chain.FlushMemBestState()
-		if err != nil {
-			return err
-		}
-
-		err = server.chain.PutUtreexoView()
-
-		if err != nil {
-			return err
-		}
-	}
 
 	return nil
 }

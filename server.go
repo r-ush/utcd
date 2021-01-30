@@ -1686,22 +1686,16 @@ func (s *server) pushMerkleBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	return nil
 }
 
+// pushUBlockMsg sends a ublock message for the provided ublock hash to the
+// connected peer.  An error is returned if the fetching of any ublock
+// component fails.
 func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	doneChan chan<- struct{}, waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
 	// Fetch the raw block bytes from the database.
 	var blockBytes []byte
-	var ud *btcacc.UData
 	err := sp.server.db.View(func(dbTx database.Tx) error {
 		var err error
 		blockBytes, err = dbTx.FetchBlock(hash)
-		if err != nil {
-			return err
-		}
-
-		ud, err = s.chain.FetchProof(hash)
-		if err != nil {
-			return err
-		}
 		return err
 	})
 	if err != nil {
@@ -1718,7 +1712,7 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	var msgBlock wire.MsgBlock
 	err = msgBlock.Deserialize(bytes.NewReader(blockBytes))
 	if err != nil {
-		peerLog.Tracef("Unable to deserialize requested block hash "+
+		peerLog.Tracef("Unable to deserialize requested block "+
 			"%v: %v", hash, err)
 
 		if doneChan != nil {
@@ -1727,19 +1721,37 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 		return err
 	}
 
+	// Fetch the utreexo proof
+	var ud *btcacc.UData
+	ud, err = s.chain.FetchProof(hash)
+	if err != nil {
+		peerLog.Tracef("Unable to fetch requested block proof %v: %v",
+			hash, err)
+
+		if doneChan != nil {
+			doneChan <- struct{}{}
+		}
+		return err
+	}
+
+	// Fetch the time-to-live value for the block
 	var ttls []int32
 	err = sp.server.db.View(func(dbTx database.Tx) error {
 		ttls, err = blockchain.FetchOnlyTTL(dbTx, hash)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	if err != nil {
+		peerLog.Tracef("Unable to fetch ttl for the requested block hash "+
+			"%v: %v", hash, err)
+		if doneChan != nil {
+			doneChan <- struct{}{}
+		}
+
 		return err
 	}
 	ud.TxoTTLs = ttls
 
+	// Create ublock
 	ublock := wire.MsgUBlock{
 		MsgBlock:    msgBlock,
 		UtreexoData: *ud,

@@ -1161,6 +1161,9 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 
 		// set to nil so that the scripts will be checked after this block
 		b.assumeValidHash = nil
+
+		log.Infof("Processed assumeValidHash at block %v"+
+			"Checking signatures from this block on", node.hash)
 	}
 
 	// Blocks created after the BIP0016 activation time need to have the
@@ -1250,10 +1253,10 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 
 // checkConnectUBlock performs several checks to confirm connecting the passed
 // block to the chain represented by the passed view does not violate any rules.
-// In addition, the passed view is updated to spend all of the referenced
-// outputs and add all of the new utxos created by block.  Thus, the view will
-// represent the state of the chain as if the block were actually connected and
-// consequently the best hash for the view is also updated to passed block.
+//
+// The passed ublock will have its proof checked and ensure that the utreexo proofs
+// are for the correct UTXOs and that the proof checks out with our stored
+// UtreexoViewpoint.
 //
 // An example of some of the checks performed are ensuring connecting the block
 // would not cause any duplicate transaction hashes for old transactions that
@@ -1261,12 +1264,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 // signature operations per block, invalid values in relation to the expected
 // block subsidy, or fail transaction script validation.
 //
-// The CheckConnectBlockTemplate function makes use of this function to perform
-// the bulk of its work.  The only difference is this function accepts a node
-// which may or may not require reorganization to connect it to the main chain
-// whereas CheckConnectBlockTemplate creates a new node which specifically
-// connects to the end of the current main chain and then calls this function
-// with that node.
+// NOTE: There are no BIP30 checks
 //
 // This function MUST be called with the chain state lock held (for writes).
 func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock, view *UtxoViewpoint) error {
@@ -1290,40 +1288,6 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 			"checking block connection: best hash is %v instead "+
 			"of expected %v", view.BestHash(), parentHash))
 	}
-
-	// BIP0030 added a rule to prevent blocks which contain duplicate
-	// transactions that 'overwrite' older transactions which are not fully
-	// spent.  See the documentation for checkBIP0030 for more details.
-	//
-	// There are two blocks in the chain which violate this rule, so the
-	// check must be skipped for those blocks.  The isBIP0030Node function
-	// is used to determine if this block is one of the two blocks that must
-	// be skipped.
-	//
-	// In addition, as of BIP0034, duplicate coinbases are no longer
-	// possible due to its requirement for including the block height in the
-	// coinbase and thus it is no longer possible to create transactions
-	// that 'overwrite' older ones.  Therefore, only enforce the rule if
-	// BIP0034 is not yet active.  This is a useful optimization because the
-	// BIP0030 check is expensive since it involves a ton of cache misses in
-	// the utxoset.
-	// TODO actually check BIP0030
-	//if !isBIP0030Node(node) && (node.height < b.chainParams.BIP0034Height) {
-	//	err := b.checkBIP0030(node, ublock.Block(), view)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-
-	// Load all of the utxos referenced by the inputs for all transactions
-	// in the block don't already exist in the utxo view from the database.
-	//
-	// These utxo entries are needed for verification of things such as
-	// transaction inputs, counting pay-to-script-hashes, and scripts.
-	//err := view.fetchInputUtxos(b.db, ublock.Block())
-	//if err != nil {
-	//	return err
-	//}
 
 	// Check that the ublock txOuts are valid
 	err := b.utreexoViewpoint.Modify(ublock)
@@ -1390,7 +1354,6 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 	// still relatively cheap as compared to running the scripts) checks
 	// against all the inputs when the signature operations are out of
 	// bounds.
-	//inskip, _ := DedupeBlock(ublock.Block())
 	var totalFees int64
 	for _, tx := range transactions {
 		txFee, err := CheckTransactionInputs(tx, node.height, view,
@@ -1407,15 +1370,6 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 			return ruleError(ErrBadFees, "total fees for block "+
 				"overflows accumulator")
 		}
-
-		// Add all of the outputs for this transaction which are not
-		// provably unspendable as available utxos.  Also, the passed
-		// spent txos slice is updated to contain an entry for each
-		// spent txout in the order each transaction spends them.
-		//err = view.connectTransaction(tx, node.height, inskip, stxos)
-		//if err != nil {
-		//	return err
-		//}
 	}
 
 	// The total output values of the coinbase transaction must not exceed
@@ -1456,6 +1410,9 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 
 		// set to nil so that the scripts will be checked after this block
 		b.assumeValidHash = nil
+
+		log.Infof("Processed assumeValidHash at block %v"+
+			"Checking signatures from this block on", node.hash)
 	}
 
 	// Blocks created after the BIP0016 activation time need to have the

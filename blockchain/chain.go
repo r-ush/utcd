@@ -114,17 +114,20 @@ type BlockChain struct {
 	// These fields are utreexo specific. Some fields are compact-state-node only
 	// and some are shared by both the
 	// bridgenode and the csn
-	utreexo          bool                // enable utreexo bridgenode
-	UtreexoBS        *UtreexoBridgeState // state for bridgenodes
-	utreexoBSPath    string              // path for utreexo
+	utreexo       bool                // enable utreexo bridgenode
+	UtreexoBS     *UtreexoBridgeState // state for bridgenodes
+	utreexoBSPath string              // path for utreexo
+
+	// utreexoQuit this tells the chain to throw away any existing blocks it
+	// may have on memory to verify.
 	utreexoQuit      bool
-	dataDir          string
-	utreexoCSN       bool // enable utreexo compact-state-node
-	ttl              bool // enable time-to-live tracking for txos
-	utreexoLookAhead int  // set a value for the ttl
-	memBlock         *memBlockStore
-	memBestState     *memBestState
-	proofFileState   *ProofFileState
+	dataDir          string            // where all the data is stored
+	utreexoCSN       bool              // enable utreexo compact-state-node
+	ttl              bool              // enable time-to-live tracking for txos
+	utreexoLookAhead int               // set a value for the ttl
+	memBlock         *memBlockStore    // one block stored in memory
+	memBestState     *memBestState     // best state stored in memory
+	proofFileState   *ProofFileState   // All the utreexo proofs
 	utreexoViewpoint *UtreexoViewpoint // compact state of the utxo set
 
 	// The following fields are calculated based upon the provided chain
@@ -783,17 +786,21 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 			return err
 		}
 
+		// If the node is a utreexo bridge node, also save the proofs
 		if b.utreexo {
 			err = dbStoreTTLForBlock(dbTx, block.Hash(), block, stxos)
 			if err != nil {
 				return err
 			}
 
+			// update the utreexo forest and create a utreexo accumulator
+			// proof for this block
 			ud, err := b.UpdateUtreexoBS(block, stxos)
 			if err != nil {
 				return err
 			}
 
+			// store the created utreexo accumulator proof in the flat file
 			err = b.proofFileState.flatFileStoreAccProof(*ud)
 			if err != nil {
 				return err
@@ -841,6 +848,11 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 	return nil
 }
+
+// connectUBlock handles connecting the passed ublock to the end of the main
+// (best) chain.
+//
+// This function MUST be called with the chain state lock held (for writes).
 func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) error {
 	// Make sure it's extending the end of the best chain.
 	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
@@ -869,6 +881,7 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) erro
 	state := newBestState(node, blockSize, blockWeight, numTxns,
 		curTotalTxns+numTxns, node.CalcPastMedianTime())
 
+	// Store the new state of the chain in memory
 	b.memBestState.state = state
 	b.memBestState.workSum = node.workSum
 	b.memBlock.StoreBlock(ublock.Block())
@@ -1457,12 +1470,9 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 
 // connectBestChainUBlock handles connecting the passed ublock to the chain while
 // respecting proper chain selection according to the chain with the most
-// proof of work.  In the typical case, the new block simply extends the main
-// chain.  However, it may also be extending (or creating) a side chain (fork)
-// which may or may not end up becoming the main chain depending on which fork
-// cumulatively has the most proof of work.  It returns whether or not the block
-// ended up on the main chain (either due to extending the main chain or causing
-// a reorganization to become the main chain).
+// proof of work.
+//
+// NOTE: Reorganiziations are not yet implemented.
 //
 // The flags modify the behavior of this function as follows:
 //  - BFFastAdd: Avoids several expensive transaction validation operations.

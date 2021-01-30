@@ -77,6 +77,11 @@ var (
 	defaultLogDir      = filepath.Join(defaultHomeDir, defaultLogDirname)
 )
 
+// change this to false test out the utreexo binary
+// otherwise it'll only enable utreexocsn and connect to the
+// designated nodes
+var release bool = false
+
 // runServiceCommand is only set to a real function on Windows.  It is used
 // to parse and execute service commands specified via the -s flag.
 var runServiceCommand func(string) error
@@ -701,35 +706,40 @@ func loadConfig() (*config, []string, error) {
 		}
 	}
 
-	if !cfg.UtreexoCSN {
-		fmt.Println("This binary only supports utreexoCSN mode." +
-			"Please run again with the flag --utreexocsn")
-		err := fmt.Errorf("")
-		return nil, nil, err
-	}
-
 	// NOTE: this is here for the utcd csn release
-	if cfg.UtreexoCSN {
-		fmt.Println("In utreexoCSN mode." +
-			"setting flag --connect to designated nodes")
-		if cfg.TestNet3 {
-			cfg.ConnectPeers = []string{
-				"34.105.121.136", // mit-dci midwest-US
-			}
-		} else {
-			cfg.ConnectPeers = []string{
-				"103.99.170.215", // wiz     japan
-				"35.188.186.244", // mit-dci midwest-US
-				"35.204.135.228", // mit-dci Europe
-			}
+	if release {
+		if !cfg.UtreexoCSN {
+			err := fmt.Errorf("%s: this binary only supports utreexoCSN mode."+
+				"Please run again with the flag --utreexocsn",
+				funcName)
+			fmt.Fprintln(os.Stderr, err)
+			return nil, nil, err
 		}
 
-		if cfg.RegressionTest || cfg.SimNet {
-			fmt.Println("This binary only supports utreexoCSN mode in" +
-				"testnet or mainnet. For regtest or simnet, please" +
-				"modify&build from the source code")
-			err := fmt.Errorf("")
-			return nil, nil, err
+		if cfg.UtreexoCSN {
+			fmt.Printf("%s: In utreexoCSN mode.\n"+
+				"setting flag --connect to the designated nodes\n",
+				funcName)
+			if cfg.TestNet3 {
+				cfg.ConnectPeers = []string{
+					"34.105.121.136", // mit-dci midwest-US
+				}
+			} else {
+				cfg.ConnectPeers = []string{
+					"103.99.170.215", // wiz     japan
+					"35.188.186.244", // mit-dci midwest-US
+					"35.204.135.228", // mit-dci Europe
+				}
+			}
+
+			if cfg.RegressionTest || cfg.SimNet {
+				err := fmt.Errorf("%s: this binary only supports utreexoCSN mode in"+
+					"testnet or mainnet. For regtest or simnet, please"+
+					"modify&build from the source code",
+					funcName)
+				fmt.Fprintln(os.Stderr, err)
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -893,6 +903,46 @@ func loadConfig() (*config, []string, error) {
 			fmt.Fprintln(os.Stderr, usageMessage)
 			return nil, nil, err
 		}
+	}
+
+	if cfg.TxIndex {
+		err := fmt.Errorf("%s: the --txindex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.AddrIndex {
+		err := fmt.Errorf("%s: the --addrindex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.DropTxIndex {
+		err := fmt.Errorf("%s: the --DropTxIndex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.DropAddrIndex {
+		err := fmt.Errorf("%s: the --DropAddrIndex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.DropCfIndex {
+		err := fmt.Errorf("%s: the --DropCfIndex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
 	}
 
 	// --txindex and --droptxindex do not mix.
