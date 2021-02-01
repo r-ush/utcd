@@ -19,3 +19,4 @@ require (
 )
 
 replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210128061119-1d9d9d57ced6
+replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20210129145908-3856211d3d90

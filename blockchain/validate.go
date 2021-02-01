@@ -1157,13 +1157,15 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 	// don't check signatures. This mimicks the behavior of the reference
 	// client
 	if b.assumeValidHash != nil && node.hash.IsEqual(b.assumeValidHash) {
-		runScripts = false
+		runScripts = true
 
 		// set to nil so that the scripts will be checked after this block
 		b.assumeValidHash = nil
 
 		log.Infof("Processed assumeValidHash at block %v"+
 			"Checking signatures from this block on", node.hash)
+	} else {
+		runScripts = false
 	}
 
 	// Blocks created after the BIP0016 activation time need to have the
@@ -1406,13 +1408,15 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 	// don't check signatures. This mimicks the behavior of the reference
 	// client
 	if b.assumeValidHash != nil && node.hash.IsEqual(b.assumeValidHash) {
-		runScripts = false
+		runScripts = true
 
 		// set to nil so that the scripts will be checked after this block
 		b.assumeValidHash = nil
 
 		log.Infof("Processed assumeValidHash at block %v"+
 			"Checking signatures from this block on", node.hash)
+	} else {
+		runScripts = false
 	}
 
 	// Blocks created after the BIP0016 activation time need to have the

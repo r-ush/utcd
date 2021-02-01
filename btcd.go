@@ -123,16 +123,8 @@ func btcdMain(serverChan chan<- *server) error {
 	defer func() error {
 		// Ensure the database is sync'd and closed on shutdown.
 		btcdLog.Infof("Gracefully shutting down the database...")
-		db.Close()
 
-		if cfg.Utreexo {
-			// TODO add saving the utreexo proofs and forest here
-			err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
-			if err != nil {
-				return err
-			}
-		}
-
+		// UtreexoCSN should be closed before the database close
 		if cfg.UtreexoCSN {
 			err = server.chain.FlushMemBlockStore()
 			if err != nil {
@@ -150,6 +142,17 @@ func btcdMain(serverChan chan<- *server) error {
 				return err
 			}
 		}
+		db.Close()
+
+		// Utreexo bridgenode stuff should be closed after the database close
+		if cfg.Utreexo {
+			// TODO add saving the utreexo proofs and forest here
+			err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}()
 
@@ -335,7 +338,7 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	debug.SetGCPercent(150)
+	debug.SetGCPercent(1000)
 
 	//f, err := os.Create("trace.out")
 	//if err != nil {
