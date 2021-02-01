@@ -524,6 +524,48 @@ func loadConfig() (*config, []string, error) {
 
 	// Create the home directory if it doesn't already exist.
 	funcName := "loadConfig"
+	// NOTE: this is here for the utcd csn release
+	if release {
+		if len(cfg.AddPeers) > 0 || len(cfg.ConnectPeers) > 0 {
+			err := fmt.Errorf("%s: this binary doesn't allow connecting to other nodes.\n",
+				funcName)
+			fmt.Fprintln(os.Stderr, err)
+			return nil, nil, err
+		}
+
+		cfg.UtreexoCSN = true
+		cfg.TestNet3 = true
+
+		if cfg.UtreexoCSN {
+			fmt.Printf("%s: In utreexoCSN mode.\n"+
+				"setting flag --connect to the designated nodes\n",
+				funcName)
+			if cfg.TestNet3 {
+				cfg.ConnectPeers = []string{
+					"34.105.121.136", // mit-dci midwest-US
+					"35.188.186.244", // mit-dci midwest-US
+					"35.204.135.228", // mit-dci Europe
+					"103.99.170.215", // wiz     japan
+				}
+			} else {
+				err := fmt.Errorf("%s: this binary only supports testnet3. "+
+					"Please run again with the flag --testnet",
+					funcName)
+				fmt.Fprintln(os.Stderr, err)
+				return nil, nil, err
+			}
+
+			if cfg.RegressionTest || cfg.SimNet {
+				err := fmt.Errorf("%s: this binary only supports utreexoCSN mode in "+
+					"testnet or mainnet. For regtest or simnet, please "+
+					"modify&build from the source code.\n",
+					funcName)
+				fmt.Fprintln(os.Stderr, err)
+				return nil, nil, err
+			}
+		}
+	}
+
 	err = os.MkdirAll(defaultHomeDir, 0700)
 	if err != nil {
 		// Show a nicer error message if it's because a symlink is
@@ -702,52 +744,6 @@ func loadConfig() (*config, []string, error) {
 				}
 			}
 			cfg.whitelists = append(cfg.whitelists, ipnet)
-		}
-	}
-
-	// NOTE: this is here for the utcd csn release
-	if release {
-		if len(cfg.AddPeers) > 0 || len(cfg.ConnectPeers) > 0 {
-			err := fmt.Errorf("%s: this binary doesn't allow connecting to other nodes.\n",
-				funcName)
-			fmt.Fprintln(os.Stderr, err)
-			return nil, nil, err
-		}
-		if !cfg.UtreexoCSN {
-			err := fmt.Errorf("%s: this binary only supports utreexoCSN mode. "+
-				"Please run again with the flag --utreexocsn",
-				funcName)
-			fmt.Fprintln(os.Stderr, err)
-			return nil, nil, err
-		}
-
-		if cfg.UtreexoCSN {
-			fmt.Printf("%s: In utreexoCSN mode.\n"+
-				"setting flag --connect to the designated nodes\n",
-				funcName)
-			if cfg.TestNet3 {
-				cfg.ConnectPeers = []string{
-					"34.105.121.136", // mit-dci midwest-US
-					"35.188.186.244", // mit-dci midwest-US
-					"35.204.135.228", // mit-dci Europe
-					"103.99.170.215", // wiz     japan
-				}
-			} else {
-				err := fmt.Errorf("%s: this binary only supports testnet3. "+
-					"Please run again with the flag --testnet",
-					funcName)
-				fmt.Fprintln(os.Stderr, err)
-				return nil, nil, err
-			}
-
-			if cfg.RegressionTest || cfg.SimNet {
-				err := fmt.Errorf("%s: this binary only supports utreexoCSN mode in "+
-					"testnet or mainnet. For regtest or simnet, please "+
-					"modify&build from the source code.\n",
-					funcName)
-				fmt.Fprintln(os.Stderr, err)
-				return nil, nil, err
-			}
 		}
 	}
 
