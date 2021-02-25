@@ -17,14 +17,13 @@ import (
 // so the function is not called under normal circumstances.
 func TestOpcodeDisabled(t *testing.T) {
 	t.Parallel()
-
 	tests := []byte{OP_CAT, OP_SUBSTR, OP_LEFT, OP_RIGHT, OP_INVERT,
-		OP_AND, OP_OR, OP_2MUL, OP_2DIV, OP_MUL, OP_DIV, OP_MOD,
+		OP_AND, OP_OR, OP_XOR, OP_2MUL, OP_2DIV, OP_MUL, OP_DIV, OP_MOD,
 		OP_LSHIFT, OP_RSHIFT,
 	}
 	for _, opcodeVal := range tests {
-		pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: nil}
-		err := opcodeDisabled(&pop, nil)
+		op := &opcodeArray[opcodeVal]
+		err := opcodeDisabled(op, nil, nil)
 		if !IsErrorCode(err, ErrDisabledOpcode) {
 			t.Errorf("opcodeDisabled: unexpected error - got %v, "+
 				"want %v", err, ErrDisabledOpcode)
@@ -124,11 +123,12 @@ func TestOpcodeDisasm(t *testing.T) {
 
 		// OP_UNKNOWN#.
 		case opcodeVal >= 0xba && opcodeVal <= 0xf9 || opcodeVal == 0xfc:
-			expectedStr = "OP_UNKNOWN" + strconv.Itoa(int(opcodeVal))
+			expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
 		}
 
-		pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: data}
-		gotStr := pop.print(true)
+		var buf strings.Builder
+		disasmOpcode(&buf, &opcodeArray[opcodeVal], data, true)
+		gotStr := buf.String()
 		if gotStr != expectedStr {
 			t.Errorf("pop.print (opcode %x): Unexpected disasm "+
 				"string - got %v, want %v", opcodeVal, gotStr,
@@ -190,11 +190,12 @@ func TestOpcodeDisasm(t *testing.T) {
 
 		// OP_UNKNOWN#.
 		case opcodeVal >= 0xba && opcodeVal <= 0xf9 || opcodeVal == 0xfc:
-			expectedStr = "OP_UNKNOWN" + strconv.Itoa(int(opcodeVal))
+			expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
 		}
 
-		pop := parsedOpcode{opcode: &opcodeArray[opcodeVal], data: data}
-		gotStr := pop.print(false)
+		var buf strings.Builder
+		disasmOpcode(&buf, &opcodeArray[opcodeVal], data, false)
+		gotStr := buf.String()
 		if gotStr != expectedStr {
 			t.Errorf("pop.print (opcode %x): Unexpected disasm "+
 				"string - got %v, want %v", opcodeVal, gotStr,

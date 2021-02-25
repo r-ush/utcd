@@ -24,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/go-socks/socks"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/lru"
 )
 
 const (
@@ -82,7 +83,7 @@ var (
 
 	// sentNonces houses the unique nonces that are generated when pushing
 	// version messages that are used to detect self connections.
-	sentNonces = newMruNonceMap(50)
+	sentNonces = lru.NewCache(50)
 
 	// allowSelfConns is only used to allow the tests to bypass the self
 	// connection detecting and disconnect logic since they intentionally
@@ -152,6 +153,8 @@ type MessageListeners struct {
 	// message.
 	OnGetBlocks func(p *Peer, msg *wire.MsgGetBlocks)
 
+	OnGetUBlocks func(p *Peer, msg *wire.MsgGetUBlocks)
+
 	// OnGetHeaders is invoked when a peer receives a getheaders bitcoin
 	// message.
 	OnGetHeaders func(p *Peer, msg *wire.MsgGetHeaders)
@@ -185,6 +188,10 @@ type MessageListeners struct {
 	// OnMerkleBlock  is invoked when a peer receives a merkleblock bitcoin
 	// message.
 	OnMerkleBlock func(p *Peer, msg *wire.MsgMerkleBlock)
+
+	// OnUBlock  is invoked when a peer receives a Utreexo block
+	// message.
+	OnUBlock func(p *Peer, msg *wire.MsgUBlock, buf []byte)
 
 	// OnVersion is invoked when a peer receives a version bitcoin message.
 	// The caller may return a reject message in which case the message will
@@ -450,7 +457,7 @@ type Peer struct {
 
 	wireEncoding wire.MessageEncoding
 
-	knownInventory     *mruInventoryMap
+	knownInventory     lru.Cache
 	prevGetBlocksMtx   sync.Mutex
 	prevGetBlocksBegin *chainhash.Hash
 	prevGetBlocksStop  *chainhash.Hash
@@ -494,6 +501,10 @@ func (p *Peer) String() string {
 // This function is safe for concurrent access.
 func (p *Peer) UpdateLastBlockHeight(newHeight int32) {
 	p.statsMtx.Lock()
+	if newHeight <= p.lastBlock {
+		p.statsMtx.Unlock()
+		return
+	}
 	log.Tracef("Updating last block height of peer %v from %v to %v",
 		p.addr, p.lastBlock, newHeight)
 	p.lastBlock = newHeight
@@ -888,6 +899,50 @@ func (p *Peer) PushGetBlocksMsg(locator blockchain.BlockLocator, stopHash *chain
 	return nil
 }
 
+// PushGetUBlocksMsg sends a getblocks message for the provided block locator
+// and stop hash.  It will ignore back-to-back duplicate requests.
+//
+// This function is safe for concurrent access.
+func (p *Peer) PushGetUBlocksMsg(locator blockchain.BlockLocator, stopHash *chainhash.Hash) error {
+	// Extract the begin hash from the block locator, if one was specified,
+	// to use for filtering duplicate getblocks requests.
+	var beginHash *chainhash.Hash
+	if len(locator) > 0 {
+		beginHash = locator[0]
+	}
+
+	// Filter duplicate getblocks requests.
+	p.prevGetBlocksMtx.Lock()
+	isDuplicate := p.prevGetBlocksStop != nil && p.prevGetBlocksBegin != nil &&
+		beginHash != nil && stopHash.IsEqual(p.prevGetBlocksStop) &&
+		beginHash.IsEqual(p.prevGetBlocksBegin)
+	p.prevGetBlocksMtx.Unlock()
+
+	if isDuplicate {
+		log.Tracef("Filtering duplicate [getublocks] with begin "+
+			"hash %v, stop hash %v", beginHash, stopHash)
+		return nil
+	}
+
+	// Construct the getblocks request and queue it to be sent.
+	msg := wire.NewMsgGetUBlocks(stopHash)
+	for _, hash := range locator {
+		err := msg.AddBlockLocatorHash(hash)
+		if err != nil {
+			return err
+		}
+	}
+	p.QueueMessage(msg, nil)
+
+	// Update the previous getblocks request information for filtering
+	// duplicates.
+	p.prevGetBlocksMtx.Lock()
+	p.prevGetBlocksBegin = beginHash
+	p.prevGetBlocksStop = stopHash
+	p.prevGetBlocksMtx.Unlock()
+	return nil
+}
+
 // PushGetHeadersMsg sends a getblocks message for the provided block locator
 // and stop hash.  It will ignore back-to-back duplicate requests.
 //
@@ -1152,9 +1207,14 @@ func (p *Peer) maybeAddDeadline(pendingResponses map[string]time.Time, msgCmd st
 		// Expects an inv message.
 		pendingResponses[wire.CmdInv] = deadline
 
+	case wire.CmdGetUBlocks:
+		// Expects an inv message.
+		pendingResponses[wire.CmdInv] = deadline
+
 	case wire.CmdGetData:
 		// Expects a block, merkleblock, tx, or notfound message.
 		pendingResponses[wire.CmdBlock] = deadline
+		pendingResponses[wire.CmdUBlock] = deadline
 		pendingResponses[wire.CmdMerkleBlock] = deadline
 		pendingResponses[wire.CmdTx] = deadline
 		pendingResponses[wire.CmdNotFound] = deadline
@@ -1212,12 +1272,15 @@ out:
 				switch msgCmd := msg.message.Command(); msgCmd {
 				case wire.CmdBlock:
 					fallthrough
+				case wire.CmdUBlock:
+					fallthrough
 				case wire.CmdMerkleBlock:
 					fallthrough
 				case wire.CmdTx:
 					fallthrough
 				case wire.CmdNotFound:
 					delete(pendingResponses, wire.CmdBlock)
+					delete(pendingResponses, wire.CmdUBlock)
 					delete(pendingResponses, wire.CmdMerkleBlock)
 					delete(pendingResponses, wire.CmdTx)
 					delete(pendingResponses, wire.CmdNotFound)
@@ -1377,20 +1440,12 @@ out:
 			break out
 
 		case *wire.MsgVerAck:
-
-			// No read lock is necessary because verAckReceived is not written
-			// to in any other goroutine.
-			if p.verAckReceived {
-				log.Infof("Already received 'verack' from peer %v -- "+
-					"disconnecting", p)
-				break out
-			}
-			p.flagsMtx.Lock()
-			p.verAckReceived = true
-			p.flagsMtx.Unlock()
-			if p.cfg.Listeners.OnVerAck != nil {
-				p.cfg.Listeners.OnVerAck(p, msg)
-			}
+			// Limit to one verack message per peer.
+			p.PushRejectMsg(
+				msg.Command(), wire.RejectDuplicate,
+				"duplicate verack message", nil, true,
+			)
+			break out
 
 		case *wire.MsgGetAddr:
 			if p.cfg.Listeners.OnGetAddr != nil {
@@ -1434,6 +1489,11 @@ out:
 				p.cfg.Listeners.OnBlock(p, msg, buf)
 			}
 
+		case *wire.MsgUBlock:
+			if p.cfg.Listeners.OnUBlock != nil {
+				p.cfg.Listeners.OnUBlock(p, msg, buf)
+			}
+
 		case *wire.MsgInv:
 			if p.cfg.Listeners.OnInv != nil {
 				p.cfg.Listeners.OnInv(p, msg)
@@ -1457,6 +1517,11 @@ out:
 		case *wire.MsgGetBlocks:
 			if p.cfg.Listeners.OnGetBlocks != nil {
 				p.cfg.Listeners.OnGetBlocks(p, msg)
+			}
+
+		case *wire.MsgGetUBlocks:
+			if p.cfg.Listeners.OnGetBlocks != nil {
+				p.cfg.Listeners.OnGetUBlocks(p, msg)
 			}
 
 		case *wire.MsgGetHeaders:
@@ -1612,6 +1677,13 @@ out:
 					invMsg.AddInvVect(iv)
 					waiting = queuePacket(outMsg{msg: invMsg},
 						pendingMsgs, waiting)
+				} else if iv.Type == wire.InvTypeUBlock ||
+					iv.Type == wire.InvTypeWitnessUBlock {
+					invMsg := wire.NewMsgInvSizeHint(1)
+					invMsg.AddInvVect(iv)
+					waiting = queuePacket(outMsg{msg: invMsg},
+						pendingMsgs, waiting)
+
 				} else {
 					invSendQueue.PushBack(iv)
 				}
@@ -1634,7 +1706,7 @@ out:
 
 				// Don't send inventory that became known after
 				// the initial check.
-				if p.knownInventory.Exists(iv) {
+				if p.knownInventory.Contains(iv) {
 					continue
 				}
 
@@ -1817,7 +1889,6 @@ func (p *Peer) QueueMessage(msg wire.Message, doneChan chan<- struct{}) {
 // This function is safe for concurrent access.
 func (p *Peer) QueueMessageWithEncoding(msg wire.Message, doneChan chan<- struct{},
 	encoding wire.MessageEncoding) {
-
 	// Avoid risk of deadlock if goroutine already exited.  The goroutine
 	// we will be sending to hangs around until it knows for a fact that
 	// it is marked as disconnected and *then* it drains the channels.
@@ -1840,7 +1911,7 @@ func (p *Peer) QueueMessageWithEncoding(msg wire.Message, doneChan chan<- struct
 func (p *Peer) QueueInventory(invVect *wire.InvVect) {
 	// Don't add the inventory to the send queue if the peer is already
 	// known to have it.
-	if p.knownInventory.Exists(invVect) {
+	if p.knownInventory.Contains(invVect) {
 		return
 	}
 
@@ -1899,7 +1970,7 @@ func (p *Peer) readRemoteVersionMsg() error {
 	}
 
 	// Detect self connections.
-	if !allowSelfConns && sentNonces.Exists(msg.Nonce) {
+	if !allowSelfConns && sentNonces.Contains(msg.Nonce) {
 		return errors.New("disconnecting peer connected to self")
 	}
 
@@ -1969,6 +2040,40 @@ func (p *Peer) readRemoteVersionMsg() error {
 			reason)
 		_ = p.writeMessage(rejectMsg, wire.LatestEncoding)
 		return errors.New(reason)
+	}
+
+	return nil
+}
+
+// readRemoteVerAckMsg waits for the next message to arrive from the remote
+// peer. If this message is not a verack message, then an error is returned.
+// This method is to be used as part of the version negotiation upon a new
+// connection.
+func (p *Peer) readRemoteVerAckMsg() error {
+	// Read the next message from the wire.
+	remoteMsg, _, err := p.readMessage(wire.LatestEncoding)
+	if err != nil {
+		return err
+	}
+
+	// It should be a verack message, otherwise send a reject message to the
+	// peer explaining why.
+	msg, ok := remoteMsg.(*wire.MsgVerAck)
+	if !ok {
+		reason := "a verack message must follow version"
+		rejectMsg := wire.NewMsgReject(
+			msg.Command(), wire.RejectMalformed, reason,
+		)
+		_ = p.writeMessage(rejectMsg, wire.LatestEncoding)
+		return errors.New(reason)
+	}
+
+	p.flagsMtx.Lock()
+	p.verAckReceived = true
+	p.flagsMtx.Unlock()
+
+	if p.cfg.Listeners.OnVerAck != nil {
+		p.cfg.Listeners.OnVerAck(p, msg)
 	}
 
 	return nil
@@ -2046,26 +2151,53 @@ func (p *Peer) writeLocalVersionMsg() error {
 	return p.writeMessage(localVerMsg, wire.LatestEncoding)
 }
 
-// negotiateInboundProtocol waits to receive a version message from the peer
-// then sends our version message. If the events do not occur in that order then
-// it returns an error.
+// negotiateInboundProtocol performs the negotiation protocol for an inbound
+// peer. The events should occur in the following order, otherwise an error is
+// returned:
+//
+//   1. Remote peer sends their version.
+//   2. We send our version.
+//   3. We send our verack.
+//   4. Remote peer sends their verack.
 func (p *Peer) negotiateInboundProtocol() error {
 	if err := p.readRemoteVersionMsg(); err != nil {
 		return err
 	}
 
-	return p.writeLocalVersionMsg()
+	if err := p.writeLocalVersionMsg(); err != nil {
+		return err
+	}
+
+	err := p.writeMessage(wire.NewMsgVerAck(), wire.LatestEncoding)
+	if err != nil {
+		return err
+	}
+
+	return p.readRemoteVerAckMsg()
 }
 
-// negotiateOutboundProtocol sends our version message then waits to receive a
-// version message from the peer.  If the events do not occur in that order then
-// it returns an error.
+// negotiateOutboundProtocol performs the negotiation protocol for an outbound
+// peer. The events should occur in the following order, otherwise an error is
+// returned:
+//
+//   1. We send our version.
+//   2. Remote peer sends their version.
+//   3. Remote peer sends their verack.
+//   4. We send our verack.
 func (p *Peer) negotiateOutboundProtocol() error {
 	if err := p.writeLocalVersionMsg(); err != nil {
 		return err
 	}
 
-	return p.readRemoteVersionMsg()
+	if err := p.readRemoteVersionMsg(); err != nil {
+		return err
+	}
+
+	if err := p.readRemoteVerAckMsg(); err != nil {
+		return err
+	}
+
+	return p.writeMessage(wire.NewMsgVerAck(), wire.LatestEncoding)
 }
 
 // start begins processing input and output messages.
@@ -2102,8 +2234,6 @@ func (p *Peer) start() error {
 	go p.outHandler()
 	go p.pingHandler()
 
-	// Send our verack message now that the IO processing machinery has started.
-	p.QueueMessage(wire.NewMsgVerAck(), nil)
 	return nil
 }
 
@@ -2173,7 +2303,7 @@ func newPeerBase(origCfg *Config, inbound bool) *Peer {
 	p := Peer{
 		inbound:         inbound,
 		wireEncoding:    wire.BaseEncoding,
-		knownInventory:  newMruInventoryMap(maxKnownInventory),
+		knownInventory:  lru.NewCache(maxKnownInventory),
 		stallControl:    make(chan stallControlMsg, 1), // nonblocking sync
 		outputQueue:     make(chan outMsg, outputBufferSize),
 		sendQueue:       make(chan outMsg, 1),   // nonblocking sync

@@ -77,6 +77,11 @@ var (
 	defaultLogDir      = filepath.Join(defaultHomeDir, defaultLogDirname)
 )
 
+// change this to false test out the utreexo binary
+// otherwise it'll only enable utreexocsn and connect to the
+// designated nodes
+var release bool = false
+
 // runServiceCommand is only set to a real function on Windows.  It is used
 // to parse and execute service commands specified via the -s flag.
 var runServiceCommand func(string) error
@@ -94,77 +99,86 @@ func minUint32(a, b uint32) uint32 {
 //
 // See loadConfig for details on the configuration load process.
 type config struct {
-	ShowVersion          bool          `short:"V" long:"version" description:"Display version information and exit"`
-	ConfigFile           string        `short:"C" long:"configfile" description:"Path to configuration file"`
-	DataDir              string        `short:"b" long:"datadir" description:"Directory to store data"`
-	LogDir               string        `long:"logdir" description:"Directory to log output."`
+	AddCheckpoints       []string      `long:"addcheckpoint" description:"Add a custom checkpoint.  Format: '<height>:<hash>'"`
 	AddPeers             []string      `short:"a" long:"addpeer" description:"Add a peer to connect with at startup"`
-	ConnectPeers         []string      `long:"connect" description:"Connect only to the specified peers at startup"`
-	DisableListen        bool          `long:"nolisten" description:"Disable listening for incoming connections -- NOTE: Listening is automatically disabled if the --connect or --proxy options are used without also specifying listen interfaces via --listen"`
-	Listeners            []string      `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 8333, testnet: 18333)"`
-	MaxPeers             int           `long:"maxpeers" description:"Max number of inbound and outbound peers"`
-	DisableBanning       bool          `long:"nobanning" description:"Disable banning of misbehaving peers"`
+	AddrIndex            bool          `long:"addrindex" description:"Maintain a full address-based transaction index which makes the searchrawtransactions RPC available"`
+	AgentBlacklist       []string      `long:"agentblacklist" description:"A comma separated list of user-agent substrings which will cause btcd to reject any peers whose user-agent contains any of the blacklisted substrings."`
+	AgentWhitelist       []string      `long:"agentwhitelist" description:"A comma separated list of user-agent substrings which will cause btcd to require all peers' user-agents to contain one of the whitelisted substrings. The blacklist is applied before the blacklist, and an empty whitelist will allow all agents that do not fail the blacklist."`
 	BanDuration          time.Duration `long:"banduration" description:"How long to ban misbehaving peers.  Valid time units are {s, m, h}.  Minimum 1 second"`
 	BanThreshold         uint32        `long:"banthreshold" description:"Maximum allowed ban score before disconnecting and banning misbehaving peers."`
-	Whitelists           []string      `long:"whitelist" description:"Add an IP network or IP that will not be banned. (eg. 192.168.1.0/24 or ::1)"`
-	RPCUser              string        `short:"u" long:"rpcuser" description:"Username for RPC connections"`
-	RPCPass              string        `short:"P" long:"rpcpass" default-mask:"-" description:"Password for RPC connections"`
-	RPCLimitUser         string        `long:"rpclimituser" description:"Username for limited RPC connections"`
-	RPCLimitPass         string        `long:"rpclimitpass" default-mask:"-" description:"Password for limited RPC connections"`
-	RPCListeners         []string      `long:"rpclisten" description:"Add an interface/port to listen for RPC connections (default port: 8334, testnet: 18334)"`
-	RPCCert              string        `long:"rpccert" description:"File containing the certificate file"`
-	RPCKey               string        `long:"rpckey" description:"File containing the certificate key"`
-	RPCMaxClients        int           `long:"rpcmaxclients" description:"Max number of RPC clients for standard connections"`
-	RPCMaxWebsockets     int           `long:"rpcmaxwebsockets" description:"Max number of RPC websocket connections"`
-	RPCMaxConcurrentReqs int           `long:"rpcmaxconcurrentreqs" description:"Max number of concurrent RPC requests that may be processed concurrently"`
-	RPCQuirks            bool          `long:"rpcquirks" description:"Mirror some JSON-RPC quirks of Bitcoin Core -- NOTE: Discouraged unless interoperability issues need to be worked around"`
+	BlockMaxSize         uint32        `long:"blockmaxsize" description:"Maximum block size in bytes to be used when creating a block"`
+	BlockMinSize         uint32        `long:"blockminsize" description:"Mininum block size in bytes to be used when creating a block"`
+	BlockMaxWeight       uint32        `long:"blockmaxweight" description:"Maximum block weight to be used when creating a block"`
+	BlockMinWeight       uint32        `long:"blockminweight" description:"Mininum block weight to be used when creating a block"`
+	BlockPrioritySize    uint32        `long:"blockprioritysize" description:"Size in bytes for high-priority/low-fee transactions when creating a block"`
+	BlocksOnly           bool          `long:"blocksonly" description:"Do not accept transactions from remote peers."`
+	ConfigFile           string        `short:"C" long:"configfile" description:"Path to configuration file"`
+	ConnectPeers         []string      `long:"connect" description:"Connect only to the specified peers at startup"`
+	CPUProfile           string        `long:"cpuprofile" description:"Write CPU profile to the specified file"`
+	DataDir              string        `short:"b" long:"datadir" description:"Directory to store data"`
+	DbType               string        `long:"dbtype" description:"Database backend to use for the Block Chain"`
+	DebugLevel           string        `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
+	DropAddrIndex        bool          `long:"dropaddrindex" description:"Deletes the address-based transaction index from the database on start up and then exits."`
+	DropCfIndex          bool          `long:"dropcfindex" description:"Deletes the index used for committed filtering (CF) support from the database on start up and then exits."`
+	DropTxIndex          bool          `long:"droptxindex" description:"Deletes the hash-based transaction index from the database on start up and then exits."`
+	ExternalIPs          []string      `long:"externalip" description:"Add an ip to the list of local addresses we claim to listen on to peers"`
+	Generate             bool          `long:"generate" description:"Generate (mine) bitcoins using the CPU"`
+	FreeTxRelayLimit     float64       `long:"limitfreerelay" description:"Limit relay of transactions with no transaction fee to the given amount in thousands of bytes per minute"`
+	Listeners            []string      `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 8333, testnet: 18333)"`
+	LogDir               string        `long:"logdir" description:"Directory to log output."`
+	MaxOrphanTxs         int           `long:"maxorphantx" description:"Max number of orphan transactions to keep in memory"`
+	MaxPeers             int           `long:"maxpeers" description:"Max number of inbound and outbound peers"`
+	MiningAddrs          []string      `long:"miningaddr" description:"Add the specified payment address to the list of addresses to use for generated blocks -- At least one address is required if the generate option is set"`
+	MinRelayTxFee        float64       `long:"minrelaytxfee" description:"The minimum transaction fee in BTC/kB to be considered a non-zero fee."`
+	DisableBanning       bool          `long:"nobanning" description:"Disable banning of misbehaving peers"`
+	NoCFilters           bool          `long:"nocfilters" description:"Disable committed filtering (CF) support"`
+	DisableCheckpoints   bool          `long:"nocheckpoints" description:"Disable built-in checkpoints.  Don't do this unless you know what you're doing."`
+	DisableDNSSeed       bool          `long:"nodnsseed" description:"Disable DNS seeding for peers"`
+	DisableListen        bool          `long:"nolisten" description:"Disable listening for incoming connections -- NOTE: Listening is automatically disabled if the --connect or --proxy options are used without also specifying listen interfaces via --listen"`
+	NoOnion              bool          `long:"noonion" description:"Disable connecting to tor hidden services"`
+	NoPeerBloomFilters   bool          `long:"nopeerbloomfilters" description:"Disable bloom filtering support"`
+	NoRelayPriority      bool          `long:"norelaypriority" description:"Do not require free or low-fee transactions to have high priority for relaying"`
+	NoWinService         bool          `long:"nowinservice" description:"Do not start as a background service on Windows -- NOTE: This flag only works on the command line, not in the config file"`
 	DisableRPC           bool          `long:"norpc" description:"Disable built-in RPC server -- NOTE: The RPC server is disabled by default if no rpcuser/rpcpass or rpclimituser/rpclimitpass is specified"`
 	DisableTLS           bool          `long:"notls" description:"Disable TLS for the RPC server -- NOTE: This is only allowed if the RPC server is bound to localhost"`
-	DisableDNSSeed       bool          `long:"nodnsseed" description:"Disable DNS seeding for peers"`
-	ExternalIPs          []string      `long:"externalip" description:"Add an ip to the list of local addresses we claim to listen on to peers"`
-	Proxy                string        `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
-	ProxyUser            string        `long:"proxyuser" description:"Username for proxy server"`
-	ProxyPass            string        `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
 	OnionProxy           string        `long:"onion" description:"Connect to tor hidden services via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
-	OnionProxyUser       string        `long:"onionuser" description:"Username for onion proxy server"`
 	OnionProxyPass       string        `long:"onionpass" default-mask:"-" description:"Password for onion proxy server"`
-	NoOnion              bool          `long:"noonion" description:"Disable connecting to tor hidden services"`
-	TorIsolation         bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
-	TestNet3             bool          `long:"testnet" description:"Use the test network"`
-	RegressionTest       bool          `long:"regtest" description:"Use the regression test network"`
-	SimNet               bool          `long:"simnet" description:"Use the simulation test network"`
-	AddCheckpoints       []string      `long:"addcheckpoint" description:"Add a custom checkpoint.  Format: '<height>:<hash>'"`
-	DisableCheckpoints   bool          `long:"nocheckpoints" description:"Disable built-in checkpoints.  Don't do this unless you know what you're doing."`
-	DbType               string        `long:"dbtype" description:"Database backend to use for the Block Chain"`
+	OnionProxyUser       string        `long:"onionuser" description:"Username for onion proxy server"`
 	Profile              string        `long:"profile" description:"Enable HTTP profiling on given port -- NOTE port must be between 1024 and 65536"`
-	CPUProfile           string        `long:"cpuprofile" description:"Write CPU profile to the specified file"`
-	DebugLevel           string        `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
-	Upnp                 bool          `long:"upnp" description:"Use UPnP to map our listening port outside of NAT"`
-	MinRelayTxFee        float64       `long:"minrelaytxfee" description:"The minimum transaction fee in BTC/kB to be considered a non-zero fee."`
-	FreeTxRelayLimit     float64       `long:"limitfreerelay" description:"Limit relay of transactions with no transaction fee to the given amount in thousands of bytes per minute"`
-	NoRelayPriority      bool          `long:"norelaypriority" description:"Do not require free or low-fee transactions to have high priority for relaying"`
-	TrickleInterval      time.Duration `long:"trickleinterval" description:"Minimum time between attempts to send new inventory to a connected peer"`
-	MaxOrphanTxs         int           `long:"maxorphantx" description:"Max number of orphan transactions to keep in memory"`
-	Generate             bool          `long:"generate" description:"Generate (mine) bitcoins using the CPU"`
-	MiningAddrs          []string      `long:"miningaddr" description:"Add the specified payment address to the list of addresses to use for generated blocks -- At least one address is required if the generate option is set"`
-	BlockMinSize         uint32        `long:"blockminsize" description:"Mininum block size in bytes to be used when creating a block"`
-	BlockMaxSize         uint32        `long:"blockmaxsize" description:"Maximum block size in bytes to be used when creating a block"`
-	BlockMinWeight       uint32        `long:"blockminweight" description:"Mininum block weight to be used when creating a block"`
-	BlockMaxWeight       uint32        `long:"blockmaxweight" description:"Maximum block weight to be used when creating a block"`
-	BlockPrioritySize    uint32        `long:"blockprioritysize" description:"Size in bytes for high-priority/low-fee transactions when creating a block"`
-	UserAgentComments    []string      `long:"uacomment" description:"Comment to add to the user agent -- See BIP 14 for more information."`
-	NoPeerBloomFilters   bool          `long:"nopeerbloomfilters" description:"Disable bloom filtering support"`
-	NoCFilters           bool          `long:"nocfilters" description:"Disable committed filtering (CF) support"`
-	DropCfIndex          bool          `long:"dropcfindex" description:"Deletes the index used for committed filtering (CF) support from the database on start up and then exits."`
-	SigCacheMaxSize      uint          `long:"sigcachemaxsize" description:"The maximum number of entries in the signature verification cache"`
-	UtxoCacheMaxSizeMiB  uint          `long:"utxocachemaxsize" description:"The maximum size in MiB of the UTXO cache"`
-	BlocksOnly           bool          `long:"blocksonly" description:"Do not accept transactions from remote peers."`
-	TxIndex              bool          `long:"txindex" description:"Maintain a full hash-based transaction index which makes all transactions available via the getrawtransaction RPC"`
-	DropTxIndex          bool          `long:"droptxindex" description:"Deletes the hash-based transaction index from the database on start up and then exits."`
-	AddrIndex            bool          `long:"addrindex" description:"Maintain a full address-based transaction index which makes the searchrawtransactions RPC available"`
-	DropAddrIndex        bool          `long:"dropaddrindex" description:"Deletes the address-based transaction index from the database on start up and then exits."`
-	RelayNonStd          bool          `long:"relaynonstd" description:"Relay non-standard transactions regardless of the default settings for the active network."`
+	Proxy                string        `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
+	ProxyPass            string        `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
+	ProxyUser            string        `long:"proxyuser" description:"Username for proxy server"`
+	RegressionTest       bool          `long:"regtest" description:"Use the regression test network"`
 	RejectNonStd         bool          `long:"rejectnonstd" description:"Reject non-standard transactions regardless of the default settings for the active network."`
+	RejectReplacement    bool          `long:"rejectreplacement" description:"Reject transactions that attempt to replace existing transactions within the mempool through the Replace-By-Fee (RBF) signaling policy."`
+	RelayNonStd          bool          `long:"relaynonstd" description:"Relay non-standard transactions regardless of the default settings for the active network."`
+	RPCCert              string        `long:"rpccert" description:"File containing the certificate file"`
+	RPCKey               string        `long:"rpckey" description:"File containing the certificate key"`
+	RPCLimitPass         string        `long:"rpclimitpass" default-mask:"-" description:"Password for limited RPC connections"`
+	RPCLimitUser         string        `long:"rpclimituser" description:"Username for limited RPC connections"`
+	RPCListeners         []string      `long:"rpclisten" description:"Add an interface/port to listen for RPC connections (default port: 8334, testnet: 18334)"`
+	RPCMaxClients        int           `long:"rpcmaxclients" description:"Max number of RPC clients for standard connections"`
+	RPCMaxConcurrentReqs int           `long:"rpcmaxconcurrentreqs" description:"Max number of concurrent RPC requests that may be processed concurrently"`
+	RPCMaxWebsockets     int           `long:"rpcmaxwebsockets" description:"Max number of RPC websocket connections"`
+	RPCQuirks            bool          `long:"rpcquirks" description:"Mirror some JSON-RPC quirks of Bitcoin Core -- NOTE: Discouraged unless interoperability issues need to be worked around"`
+	RPCPass              string        `short:"P" long:"rpcpass" default-mask:"-" description:"Password for RPC connections"`
+	RPCUser              string        `short:"u" long:"rpcuser" description:"Username for RPC connections"`
+	SigCacheMaxSize      uint          `long:"sigcachemaxsize" description:"The maximum number of entries in the signature verification cache"`
+	SimNet               bool          `long:"simnet" description:"Use the simulation test network"`
+	TestNet3             bool          `long:"testnet" description:"Use the test network"`
+	Utreexo              bool          `long:"utreexo" description:"Serve Utreexo Proofs"`
+	UtreexoBSPath        string        `long:"utreexobspath" description:"Path for saving the Utreexo BridgeNode State"`
+	UtreexoCSN           bool          `long:"utreexocsn" description:"Enable Utreexo pruning"`
+	UtreexoLookAhead     int           `long:"utreexolookahead" description:"How many blocks ahead to cache for Utreexo"`
+	TorIsolation         bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
+	TrickleInterval      time.Duration `long:"trickleinterval" description:"Minimum time between attempts to send new inventory to a connected peer"`
+	UserAgentComments    []string      `long:"uacomment" description:"Comment to add to the user agent -- See BIP 14 for more information."`
+	UtxoCacheMaxSizeMiB  uint          `long:"utxocachemaxsize" description:"The maximum size in MiB of the UTXO cache"`
+	TTL                  bool          `long:"ttl" description:"Enable indexing of the time-to-live values for txos"`
+	TxIndex              bool          `long:"txindex" description:"Maintain a full hash-based transaction index which makes all transactions available via the getrawtransaction RPC"`
+	Upnp                 bool          `long:"upnp" description:"Use UPnP to map our listening port outside of NAT"`
+	ShowVersion          bool          `short:"V" long:"version" description:"Display version information and exit"`
+	Whitelists           []string      `long:"whitelist" description:"Add an IP network or IP that will not be banned. (eg. 192.168.1.0/24 or ::1)"`
 	lookup               func(string) ([]net.IP, error)
 	oniondial            func(string, string, time.Duration) (net.Conn, error)
 	dial                 func(string, string, time.Duration) (net.Conn, error)
@@ -513,6 +527,50 @@ func loadConfig() (*config, []string, error) {
 
 	// Create the home directory if it doesn't already exist.
 	funcName := "loadConfig"
+	// NOTE: this is here for the utcd csn release
+	if release {
+		if len(cfg.AddPeers) > 0 || len(cfg.ConnectPeers) > 0 {
+			err := fmt.Errorf("%s: this binary doesn't allow connecting to other nodes.\n",
+				funcName)
+			fmt.Fprintln(os.Stderr, err)
+			return nil, nil, err
+		}
+
+		cfg.UtreexoCSN = true
+		cfg.TestNet3 = true
+		cfg.BlocksOnly = true
+		cfg.NoCFilters = true
+
+		if cfg.UtreexoCSN {
+			fmt.Printf("%s: In utreexoCSN mode.\n"+
+				"setting flag --connect to the designated nodes\n",
+				funcName)
+			if cfg.TestNet3 {
+				cfg.ConnectPeers = []string{
+					"34.105.121.136", // mit-dci midwest-US
+					"35.188.186.244", // mit-dci midwest-US
+					"35.204.135.228", // mit-dci Europe
+					"103.99.170.215", // wiz     japan
+				}
+			} else {
+				err := fmt.Errorf("%s: this binary only supports testnet3. "+
+					"Please run again with the flag --testnet",
+					funcName)
+				fmt.Fprintln(os.Stderr, err)
+				return nil, nil, err
+			}
+
+			if cfg.RegressionTest || cfg.SimNet {
+				err := fmt.Errorf("%s: this binary only supports utreexoCSN mode in "+
+					"testnet or mainnet. For regtest or simnet, please "+
+					"modify&build from the source code.\n",
+					funcName)
+				fmt.Fprintln(os.Stderr, err)
+				return nil, nil, err
+			}
+		}
+	}
+
 	err = os.MkdirAll(defaultHomeDir, 0700)
 	if err != nil {
 		// Show a nicer error message if it's because a symlink is
@@ -528,6 +586,25 @@ func loadConfig() (*config, []string, error) {
 		str := "%s: Failed to create home directory: %v"
 		err := fmt.Errorf(str, funcName, err)
 		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	// Multiple utreexo modes can't be selected simultaneously.
+	numUtreexo := 0
+
+	if cfg.Utreexo {
+		numUtreexo++
+	}
+	if cfg.UtreexoCSN {
+		numUtreexo++
+	}
+
+	if numUtreexo > 1 {
+		str := "%s: The utreexo and utreexocsn params " +
+			"can't be used together -- choose one of the two"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
 		return nil, nil, err
 	}
 
@@ -597,6 +674,8 @@ func loadConfig() (*config, []string, error) {
 		fmt.Println("Supported subsystems", supportedSubsystems())
 		os.Exit(0)
 	}
+
+	cfg.UtreexoBSPath = filepath.Join(cfg.DataDir, "bridge_data")
 
 	// Initialize log rotation.  After log rotation has been initialized, the
 	// logger variables may be used.
@@ -833,6 +912,46 @@ func loadConfig() (*config, []string, error) {
 			fmt.Fprintln(os.Stderr, usageMessage)
 			return nil, nil, err
 		}
+	}
+
+	if cfg.TxIndex {
+		err := fmt.Errorf("%s: the --txindex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.AddrIndex {
+		err := fmt.Errorf("%s: the --addrindex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.DropTxIndex {
+		err := fmt.Errorf("%s: the --DropTxIndex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.DropAddrIndex {
+		err := fmt.Errorf("%s: the --DropAddrIndex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+	}
+
+	if cfg.DropCfIndex {
+		err := fmt.Errorf("%s: the --DropCfIndex"+
+			"not supported for this utreexo release",
+			funcName)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
 	}
 
 	// --txindex and --droptxindex do not mix.

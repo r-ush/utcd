@@ -18,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/go-socks/socks"
+	"github.com/mit-dci/utreexo/btcacc"
 )
 
 // conn mocks a network connection by implementing the net.Conn interface.  It
@@ -248,6 +249,15 @@ func TestPeerConnection(t *testing.T) {
 		Services:          wire.SFNodeNetwork | wire.SFNodeWitness,
 		TrickleInterval:   time.Second * 10,
 	}
+	//peer3Cfg := &peer.Config{
+	//	Listeners:         peer1Cfg.Listeners,
+	//	UserAgentName:     "peer",
+	//	UserAgentVersion:  "1.0",
+	//	UserAgentComments: []string{"comment"},
+	//	ChainParams:       &chaincfg.MainNetParams,
+	//	Services:          wire.SFNodeNetwork | wire.SFNodeWitness | wire.SFNodeUtreexo,
+	//	TrickleInterval:   time.Second * 10,
+	//}
 
 	wantStats1 := peerStats{
 		wantUserAgent:       wire.DefaultUserAgent + "peer:1.0(comment)/",
@@ -279,6 +289,22 @@ func TestPeerConnection(t *testing.T) {
 		wantBytesReceived:   167,
 		wantWitnessEnabled:  true,
 	}
+
+	//wantStats3 := peerStats{
+	//	wantUserAgent:       wire.DefaultUserAgent + "peer:1.0(comment)/",
+	//	wantServices:        wire.SFNodeNetwork | wire.SFNodeWitness | wire.SFNodeUtreexo,
+	//	wantProtocolVersion: wire.RejectVersion,
+	//	wantConnected:       true,
+	//	wantVersionKnown:    true,
+	//	wantVerAckReceived:  true,
+	//	wantLastPingTime:    time.Time{},
+	//	wantLastPingNonce:   uint64(0),
+	//	wantLastPingMicros:  int64(0),
+	//	wantTimeOffset:      int64(0),
+	//	wantBytesSent:       167, // 143 version + 24 verack
+	//	wantBytesReceived:   167,
+	//	wantWitnessEnabled:  true,
+	//}
 
 	tests := []struct {
 		name  string
@@ -344,6 +370,7 @@ func TestPeerConnection(t *testing.T) {
 			t.Errorf("TestPeerConnection setup #%d: unexpected err %v", i, err)
 			return
 		}
+		//testPeer(t, inPeer, wantStats3)
 		testPeer(t, inPeer, wantStats2)
 		testPeer(t, outPeer, wantStats1)
 
@@ -382,6 +409,9 @@ func TestPeerListeners(t *testing.T) {
 				ok <- msg
 			},
 			OnBlock: func(p *peer.Peer, msg *wire.MsgBlock, buf []byte) {
+				ok <- msg
+			},
+			OnUBlock: func(p *peer.Peer, msg *wire.MsgUBlock, buf []byte) {
 				ok <- msg
 			},
 			OnInv: func(p *peer.Peer, msg *wire.MsgInv) {
@@ -517,6 +547,10 @@ func TestPeerListeners(t *testing.T) {
 			"OnBlock",
 			wire.NewMsgBlock(wire.NewBlockHeader(1,
 				&chainhash.Hash{}, &chainhash.Hash{}, 1, 1)),
+		},
+		{
+			"OnUBlock",
+			wire.NewMsgUBlock(wire.MsgBlock{}, btcacc.UData{}),
 		},
 		{
 			"OnInv",
@@ -914,6 +948,72 @@ func TestDuplicateVersionMsg(t *testing.T) {
 	case <-disconnected:
 	case <-time.After(time.Second):
 		t.Fatal("peer did not disconnect")
+	}
+}
+
+// TestUpdateLastBlockHeight ensures the last block height is set properly
+// during the initial version negotiation and is only allowed to advance to
+// higher values via the associated update function.
+func TestUpdateLastBlockHeight(t *testing.T) {
+	// Create a pair of peers that are connected to each other using a fake
+	// connection and the remote peer starting at height 100.
+	const remotePeerHeight = 100
+	verack := make(chan struct{})
+	peerCfg := peer.Config{
+		Listeners: peer.MessageListeners{
+			OnVerAck: func(p *peer.Peer, msg *wire.MsgVerAck) {
+				verack <- struct{}{}
+			},
+		},
+		UserAgentName:    "peer",
+		UserAgentVersion: "1.0",
+		ChainParams:      &chaincfg.MainNetParams,
+		Services:         0,
+	}
+	remotePeerCfg := peerCfg
+	remotePeerCfg.NewestBlock = func() (*chainhash.Hash, int32, error) {
+		return &chainhash.Hash{}, remotePeerHeight, nil
+	}
+	inConn, outConn := pipe(
+		&conn{laddr: "10.0.0.1:9108", raddr: "10.0.0.2:9108"},
+		&conn{laddr: "10.0.0.2:9108", raddr: "10.0.0.1:9108"},
+	)
+	localPeer, err := peer.NewOutboundPeer(&peerCfg, inConn.laddr)
+	if err != nil {
+		t.Fatalf("NewOutboundPeer: unexpected err: %v\n", err)
+	}
+	localPeer.AssociateConnection(outConn)
+	inPeer := peer.NewInboundPeer(&remotePeerCfg)
+	inPeer.AssociateConnection(inConn)
+
+	// Wait for the veracks from the initial protocol version negotiation.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-verack:
+		case <-time.After(time.Second):
+			t.Fatal("verack timeout")
+		}
+	}
+
+	// Ensure the latest block height starts at the value reported by the remote
+	// peer via its version message.
+	if height := localPeer.LastBlock(); height != remotePeerHeight {
+		t.Fatalf("wrong starting height - got %d, want %d", height,
+			remotePeerHeight)
+	}
+
+	// Ensure the latest block height is not allowed to go backwards.
+	localPeer.UpdateLastBlockHeight(remotePeerHeight - 1)
+	if height := localPeer.LastBlock(); height != remotePeerHeight {
+		t.Fatalf("height allowed to go backwards - got %d, want %d", height,
+			remotePeerHeight)
+	}
+
+	// Ensure the latest block height is allowed to advance.
+	localPeer.UpdateLastBlockHeight(remotePeerHeight + 1)
+	if height := localPeer.LastBlock(); height != remotePeerHeight+1 {
+		t.Fatalf("height not allowed to advance - got %d, want %d", height,
+			remotePeerHeight+1)
 	}
 }
 

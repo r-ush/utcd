@@ -6,6 +6,9 @@
 package btcec
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -819,4 +822,300 @@ func TestInverse(t *testing.T) {
 			continue
 		}
 	}
+}
+
+// randFieldVal returns a random, normalized element in the field.
+func randFieldVal(t *testing.T) fieldVal {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("unable to create random element: %v", err)
+	}
+
+	var x fieldVal
+	return *x.SetBytes(&b).Normalize()
+}
+
+type sqrtTest struct {
+	name     string
+	in       string
+	expected string
+}
+
+// TestSqrt asserts that a fieldVal properly computes the square root modulo the
+// sep256k1 prime.
+func TestSqrt(t *testing.T) {
+	var tests []sqrtTest
+
+	// No valid root exists for the negative of a square.
+	for i := uint(9); i > 0; i-- {
+		var (
+			x fieldVal
+			s fieldVal // x^2 mod p
+			n fieldVal // -x^2 mod p
+		)
+
+		x.SetInt(i)
+		s.SquareVal(&x).Normalize()
+		n.NegateVal(&s, 1).Normalize()
+
+		tests = append(tests, sqrtTest{
+			name: fmt.Sprintf("-%d", i),
+			in:   fmt.Sprintf("%x", *n.Bytes()),
+		})
+	}
+
+	// A root should exist for true squares.
+	for i := uint(0); i < 10; i++ {
+		var (
+			x fieldVal
+			s fieldVal // x^2 mod p
+		)
+
+		x.SetInt(i)
+		s.SquareVal(&x).Normalize()
+
+		tests = append(tests, sqrtTest{
+			name:     fmt.Sprintf("%d", i),
+			in:       fmt.Sprintf("%x", *s.Bytes()),
+			expected: fmt.Sprintf("%x", *x.Bytes()),
+		})
+	}
+
+	// Compute a non-square element, by negating if it has a root.
+	ns := randFieldVal(t)
+	if new(fieldVal).SqrtVal(&ns).Square().Equals(&ns) {
+		ns.Negate(1).Normalize()
+	}
+
+	// For large random field values, test that:
+	//  1) its square has a valid root.
+	//  2) the negative of its square has no root.
+	//  3) the product of its square with a non-square has no root.
+	for i := 0; i < 10; i++ {
+		var (
+			x fieldVal
+			s fieldVal // x^2 mod p
+			n fieldVal // -x^2 mod p
+			m fieldVal // ns*x^2 mod p
+		)
+
+		x = randFieldVal(t)
+		s.SquareVal(&x).Normalize()
+		n.NegateVal(&s, 1).Normalize()
+		m.Mul2(&s, &ns).Normalize()
+
+		// A root should exist for true squares.
+		tests = append(tests, sqrtTest{
+			name:     fmt.Sprintf("%x", *s.Bytes()),
+			in:       fmt.Sprintf("%x", *s.Bytes()),
+			expected: fmt.Sprintf("%x", *x.Bytes()),
+		})
+
+		// No valid root exists for the negative of a square.
+		tests = append(tests, sqrtTest{
+			name: fmt.Sprintf("-%x", *s.Bytes()),
+			in:   fmt.Sprintf("%x", *n.Bytes()),
+		})
+
+		// No root should be computed for product of a square and
+		// non-square.
+		tests = append(tests, sqrtTest{
+			name: fmt.Sprintf("ns*%x", *s.Bytes()),
+			in:   fmt.Sprintf("%x", *m.Bytes()),
+		})
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testSqrt(t, test)
+		})
+	}
+}
+
+func testSqrt(t *testing.T, test sqrtTest) {
+	var (
+		f       fieldVal
+		root    fieldVal
+		rootNeg fieldVal
+	)
+
+	f.SetHex(test.in).Normalize()
+
+	// Compute sqrt(f) and its negative.
+	root.SqrtVal(&f).Normalize()
+	rootNeg.NegateVal(&root, 1).Normalize()
+
+	switch {
+
+	// If we expect a square root, verify that either the computed square
+	// root is +/- the expected value.
+	case len(test.expected) > 0:
+		var expected fieldVal
+		expected.SetHex(test.expected).Normalize()
+		if !root.Equals(&expected) && !rootNeg.Equals(&expected) {
+			t.Fatalf("fieldVal.Sqrt incorrect root\n"+
+				"got:     %v\ngot_neg: %v\nwant:    %v",
+				root, rootNeg, expected)
+		}
+
+	// Otherwise, we expect this input not to have a square root.
+	default:
+		if root.Square().Equals(&f) || rootNeg.Square().Equals(&f) {
+			t.Fatalf("fieldVal.Sqrt root should not exist\n"+
+				"got:     %v\ngot_neg: %v", root, rootNeg)
+		}
+	}
+}
+
+// TestFieldSetBytes ensures that setting a field value to a 256-bit big-endian
+// unsigned integer via both the slice and array methods works as expected for
+// edge cases.  Random cases are tested via the various other tests.
+func TestFieldSetBytes(t *testing.T) {
+	tests := []struct {
+		name     string     // test description
+		in       string     // hex encoded test value
+		expected [10]uint32 // expected raw ints
+	}{{
+		name:     "zero",
+		in:       "00",
+		expected: [10]uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	}, {
+		name: "field prime",
+		in:   "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x03ffffbf, 0x03ffffff, 0x03ffffff, 0x03ffffff,
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x003fffff,
+		},
+	}, {
+		name: "field prime - 1",
+		in:   "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
+		expected: [10]uint32{
+			0x03fffc2e, 0x03ffffbf, 0x03ffffff, 0x03ffffff, 0x03ffffff,
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x003fffff,
+		},
+	}, {
+		name: "field prime + 1 (overflow in word zero)",
+		in:   "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30",
+		expected: [10]uint32{
+			0x03fffc30, 0x03ffffbf, 0x03ffffff, 0x03ffffff, 0x03ffffff,
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x003fffff,
+		},
+	}, {
+		name: "field prime first 32 bits",
+		in:   "fffffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x00000003f, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		},
+	}, {
+		name: "field prime word zero",
+		in:   "03fffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		},
+	}, {
+		name: "field prime first 64 bits",
+		in:   "fffffffefffffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x03ffffbf, 0x00000fff, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		},
+	}, {
+		name: "field prime word zero and one",
+		in:   "0ffffefffffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x03ffffbf, 0x00000000, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		},
+	}, {
+		name: "field prime first 96 bits",
+		in:   "fffffffffffffffefffffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x03ffffbf, 0x03ffffff, 0x0003ffff, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		},
+	}, {
+		name: "field prime word zero, one, and two",
+		in:   "3ffffffffffefffffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x03ffffbf, 0x03ffffff, 0x00000000, 0x00000000,
+			0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+		},
+	}, {
+		name: "overflow in word one (prime + 1<<26)",
+		in:   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffff03fffc2f",
+		expected: [10]uint32{
+			0x03fffc2f, 0x03ffffc0, 0x03ffffff, 0x03ffffff, 0x03ffffff,
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x003fffff,
+		},
+	}, {
+		name: "(field prime - 1) * 2 NOT mod P, truncated >32 bytes",
+		in:   "01fffffffffffffffffffffffffffffffffffffffffffffffffffffffdfffff85c",
+		expected: [10]uint32{
+			0x01fffff8, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff,
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x00007fff,
+		},
+	}, {
+		name: "2^256 - 1",
+		in:   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		expected: [10]uint32{
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff,
+			0x03ffffff, 0x03ffffff, 0x03ffffff, 0x03ffffff, 0x003fffff,
+		},
+	}, {
+		name: "alternating bits",
+		in:   "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+		expected: [10]uint32{
+			0x01a5a5a5, 0x01696969, 0x025a5a5a, 0x02969696, 0x01a5a5a5,
+			0x01696969, 0x025a5a5a, 0x02969696, 0x01a5a5a5, 0x00296969,
+		},
+	}, {
+		name: "alternating bits 2",
+		in:   "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+		expected: [10]uint32{
+			0x025a5a5a, 0x02969696, 0x01a5a5a5, 0x01696969, 0x025a5a5a,
+			0x02969696, 0x01a5a5a5, 0x01696969, 0x025a5a5a, 0x00169696,
+		},
+	}}
+
+	for _, test := range tests {
+		inBytes := hexToBytes(test.in)
+
+		// Ensure setting the bytes via the slice method works as expected.
+		var f fieldVal
+		f.SetByteSlice(inBytes)
+		if !reflect.DeepEqual(f.n, test.expected) {
+			t.Errorf("%s: unexpected result\ngot: %x\nwant: %x", test.name, f.n,
+				test.expected)
+			continue
+		}
+
+		// Ensure setting the bytes via the array method works as expected.
+		var f2 fieldVal
+		var b32 [32]byte
+		truncatedInBytes := inBytes
+		if len(truncatedInBytes) > 32 {
+			truncatedInBytes = truncatedInBytes[:32]
+		}
+		copy(b32[32-len(truncatedInBytes):], truncatedInBytes)
+		f2.SetBytes(&b32)
+		if !reflect.DeepEqual(f2.n, test.expected) {
+			t.Errorf("%s: unexpected result\ngot: %x\nwant: %x", test.name,
+				f2.n, test.expected)
+			continue
+		}
+	}
+}
+
+// hexToBytes converts the passed hex string into bytes and will panic if there
+// is an error.  This is only provided for the hard-coded constants so errors in
+// the source code can be detected. It will only (and must only) be called with
+// hard-coded values.
+func hexToBytes(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic("invalid hex in source file: " + s)
+	}
+	return b
 }

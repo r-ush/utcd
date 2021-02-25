@@ -106,10 +106,18 @@ func readNetAddress(r io.Reader, pver uint32, na *NetAddress, ts bool) error {
 		return err
 	}
 	// Sigh.  Bitcoin protocol mixes little and big endian.
-	port, err := binarySerializer.Uint16(r, bigEndian)
+	bs := newSerializer()
+	port, err := bs.Uint16(r, bigEndian)
+	bs.free()
 	if err != nil {
 		return err
 	}
+
+	//buf := make([]byte, 2)
+	//if _, err := io.ReadFull(r, buf); err != nil {
+	//	return err
+	//}
+	//port := binary.BigEndian.Uint16(buf)
 
 	*na = NetAddress{
 		Timestamp: na.Timestamp,

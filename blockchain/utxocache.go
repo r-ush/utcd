@@ -44,6 +44,10 @@ const (
 
 	// pubKeyHashLen is the length of a P2PKH script.
 	pubKeyHashLen = 25
+
+	// SSTxoIndexNA is all the utxos that don't have a sstxo because they're
+	// a same block spend
+	SSTxoIndexNA = -2
 )
 
 // txoFlags is a bitmask defining additional information and state for a
@@ -84,6 +88,7 @@ type UtxoEntry struct {
 	amount      int64
 	pkScript    []byte // The public key script for the output.
 	blockHeight int32  // Height of block containing tx.
+	index       int16  // index of "spendable and not a same block spend" stxos
 
 	// packedFlags contains additional info about output such as whether it
 	// is a coinbase, whether it is spent, and whether it has been modified
@@ -114,6 +119,12 @@ func (entry *UtxoEntry) isModified() bool {
 // been stored in the database.
 func (entry *UtxoEntry) isFresh() bool {
 	return entry.packedFlags&tfFresh == tfFresh
+}
+
+// IsSpent returns whether or not the output has been spent based upon the
+// current state of the unspent transaction output view it was obtained from.
+func (entry *UtxoEntry) Index() int16 {
+	return entry.index
 }
 
 // BlockHeight returns the height of the block containing the output.
@@ -164,6 +175,23 @@ func (entry *UtxoEntry) Clone() *UtxoEntry {
 		pkScript:    entry.pkScript,
 		blockHeight: entry.blockHeight,
 		packedFlags: entry.packedFlags,
+	}
+}
+
+// NewUtxoEntry returns a new UtxoEntry built from the arguments.
+func NewUtxoEntry(
+	txOut *wire.TxOut, blockHeight int32, isCoinbase bool) *UtxoEntry {
+	var cbFlag txoFlags
+	if isCoinbase {
+		cbFlag |= tfCoinBase
+	}
+
+	return &UtxoEntry{
+		amount:      txOut.Value,
+		pkScript:    txOut.PkScript,
+		blockHeight: blockHeight,
+		index:       SSTxoIndexNA,
+		packedFlags: cbFlag,
 	}
 }
 
