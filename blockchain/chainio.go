@@ -171,19 +171,10 @@ func serializeUtreexoView(uView *UtreexoViewpoint) ([]byte, error) {
 		return nil, err
 	}
 
-	//serializedAcc = append(serializedAcc, uView.bestHash[:]...)
-
 	return serializedAcc, nil
 }
 
 func deserializeUtreexoView(uView *UtreexoViewpoint, serializedUView []byte) error {
-	//bestHash := serializedUView[len(serializedUView)-chainhash.HashSize:]
-
-	//if len(bestHash) != chainhash.HashSize {
-	//	return errDeserialize(fmt.Sprintf("deserialized bestHash less than 32 bytes"+"bestHash: %v", bestHash))
-	//}
-	//copy(uView.bestHash[:], bestHash)
-
 	err := uView.accumulator.Deserialize(serializedUView)
 	if err != nil {
 		return err
@@ -1774,6 +1765,7 @@ type ProofFileState struct {
 	currentOffset int64
 	proofState    proofFiler
 	offsetState   offsetFiler
+	offsets       []int64
 }
 
 // proofFiler is just the prooffile with a rw lock. Mimics the filer
@@ -1826,9 +1818,49 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 		rwMutex: sync.RWMutex{},
 	}
 
-	pf.currentOffset, err = proofFile.Seek(0, 2)
+	offsetFileSize, err := offsetFile.Seek(0, 2)
 	if err != nil {
 		return err
+	}
+	if offsetFileSize%8 != 0 {
+		return fmt.Errorf("offset file not mulitple of 8 bytes")
+	}
+
+	// resume setup -- read all existing offsets to ram
+	if offsetFileSize > 0 {
+		// offsetFile already exists so read the whole thing and send over the
+		// channel to the ttl worker.
+		maxHeight := int32(offsetFileSize / 8)
+		// seek back to the file start / block "0"
+		_, err := pf.offsetState.file.Seek(0, 0)
+		if err != nil {
+			return err
+		}
+		pf.offsets = make([]int64, maxHeight)
+
+		var currentHeight int32
+		// run through the file, read everything and push into the channel
+		for currentHeight < maxHeight {
+			err = binary.Read(pf.offsetState.file, binary.BigEndian, &pf.currentOffset)
+			if err != nil {
+				fmt.Printf("couldn't populate in-ram offsets on startup")
+				return err
+			}
+			pf.offsets[currentHeight] = pf.currentOffset
+			currentHeight++
+		}
+
+		// set currentOffset to the end of the proof file
+		pf.currentOffset, _ = pf.proofState.file.Seek(0, 2)
+
+	} else { // first time startup
+		// there is no block 0 so leave that empty
+		_, err = pf.offsetState.file.Write(make([]byte, 8))
+		if err != nil {
+			return err
+		}
+		// do the same with the in-ram slice
+		pf.offsets = make([]int64, 1)
 	}
 
 	return nil
@@ -1877,6 +1909,10 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 	// pre-allocated the needed buffer
 	udSize := ud.SerializeSize()
 	buf := make([]byte, udSize)
+
+	// write write the offset of the current proof to the offset file
+	buf = buf[:8]
+	pf.offsets = append(pf.offsets, pf.currentOffset)
 
 	// write write the offset of the current proof to the offset file
 	pf.offsetState.rwMutex.Lock()
@@ -2000,6 +2036,31 @@ func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 	b.proofFileState.proofState.rwMutex.RUnlock()
 
 	return &ud, nil
+}
+
+// writeTTLs writes the time-to-live values to the flatfiles along with the utreexo proofs
+func (pf *ProofFileState) writeTTLs(block *btcutil.Block, stxos []SpentTxOut) error {
+	var ttlBytes [4]byte
+	count := countDedupedStxos(block)
+
+	for i := 0; i < count-1; i++ {
+		// If it's an OP_RETURN or a same block spend, skip
+		if stxos[i].TTL == 0 || stxos[i].Index == SSTxoIndexNA {
+			continue
+		}
+		binary.BigEndian.PutUint32(ttlBytes[:],
+			uint32(stxos[i].TTL))
+		// write it's lifespan as a 4 byte int32 (bit of a waste as
+		// 2 or 3 bytes would work)
+		// add 16: 4 for magic, 4 for size, 4 for height, 4 numTTL, then ttls start
+		_, err := pf.proofState.file.WriteAt(ttlBytes[:],
+			pf.offsets[stxos[i].Height]+16+int64(stxos[i].Index*4))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // blockIndexKey generates the binary key for an entry in the block index

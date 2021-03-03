@@ -806,11 +806,6 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 		// If the node is a utreexo bridge node, also save the proofs
 		if b.utreexo {
-			err = dbStoreTTLForBlock(dbTx, block.Hash(), block, stxos)
-			if err != nil {
-				return err
-			}
-
 			// update the utreexo forest and create a utreexo accumulator
 			// proof for this block
 			ud, err := b.UpdateUtreexoBS(block, stxos)
@@ -820,6 +815,12 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 
 			// store the created utreexo accumulator proof in the flat file
 			err = b.proofFileState.flatFileStoreAccProof(*ud)
+			if err != nil {
+				return err
+			}
+
+			// store the created utreexo accumulator proof in the flat file
+			err = b.proofFileState.writeTTLs(block, stxos)
 			if err != nil {
 				return err
 			}

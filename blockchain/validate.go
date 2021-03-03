@@ -403,7 +403,7 @@ func CountP2SHSigOps(tx *btcutil.Tx, isCoinBaseTx bool, utxoView *UtxoViewpoint)
 		// Count the precise number of signature operations in the
 		// referenced public key script.
 		sigScript := txIn.SignatureScript
-		numSigOps := txscript.GetPreciseSigOpCount(sigScript, pkScript)
+		numSigOps := txscript.GetPreciseSigOpCount(sigScript, pkScript, true)
 
 		// We could potentially overflow the accumulator so check for
 		// overflow.

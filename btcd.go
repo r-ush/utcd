@@ -338,7 +338,7 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	debug.SetGCPercent(150)
+	debug.SetGCPercent(20)
 
 	//f, err := os.Create("trace.out")
 	//if err != nil {

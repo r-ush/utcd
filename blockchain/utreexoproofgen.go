@@ -118,6 +118,9 @@ func (b *BlockChain) UpdateUtreexoBS(block *btcutil.Block, stxos []SpentTxOut) (
 		return nil, err
 	}
 
+	// append space for the ttls
+	ud.TxoTTLs = make([]int32, len(adds))
+
 	// TODO don't ignore undoblock
 	_, err = b.UtreexoBS.forest.Modify(adds, ud.AccProof.Targets)
 	if err != nil {
