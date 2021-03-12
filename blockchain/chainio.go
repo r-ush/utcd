@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/wire"
@@ -1376,6 +1377,52 @@ func (b *BlockChain) createChainState() error {
 // database.  When the db does not yet contain any chain state, both it and the
 // chain state are initialized to the genesis block.
 func (b *BlockChain) initChainState() error {
+	// Skip all the other initialization if we're just verifing the utreexo root
+	// range. We don't save any state so this is fine.
+	if b.utreexoRootToVerify != nil {
+		// Create a new node from the genesis block and set it as the best node.
+		genesisBlock := btcutil.NewBlock(b.chainParams.GenesisBlock)
+		genesisBlock.SetHeight(0)
+		header := &genesisBlock.MsgBlock().Header
+		node := newBlockNode(header, nil)
+		node.status = statusDataStored | statusValid
+		b.bestChain.SetTip(node)
+
+		// Add the new node to the index which is used for faster lookups.
+		b.index.addNode(node)
+
+		// Initialize the state related to the best block.  Since it is the
+		// genesis block, use its timestamp for the median time.
+		numTxns := uint64(len(genesisBlock.MsgBlock().Transactions))
+		blockSize := uint64(genesisBlock.MsgBlock().SerializeSize())
+		blockWeight := uint64(GetBlockWeight(genesisBlock))
+		b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
+			numTxns, time.Unix(node.timestamp, 0))
+		prevUtreexoRoot := b.findPreviousUtreexoRootHint(b.utreexoRootToVerify.Height)
+		// This means we're verifing from genesis
+		if prevUtreexoRoot == nil {
+			// Create empty utreexoViewpoint
+			b.utreexoViewpoint = NewUtreexoViewpoint()
+		} else {
+			b.utreexoStartRoot = prevUtreexoRoot
+			rootBytes, err := chaincfg.UtreexoRootHintToBytes(*prevUtreexoRoot)
+			if err != nil {
+				return err
+			}
+
+			uView := NewUtreexoViewpoint()
+			err = deserializeUtreexoView(uView, rootBytes)
+			if err != nil {
+				return err
+			}
+			b.utreexoViewpoint = uView
+		}
+
+		b.memBlock = &memBlockStore{}
+		b.memBestState = &memBestState{}
+
+		return nil
+	}
 	// Determine the state of the chain database. We may need to initialize
 	// everything from scratch or upgrade certain buckets.
 	var initialized, hasBlockIndex bool
@@ -1401,8 +1448,9 @@ func (b *BlockChain) initChainState() error {
 		}
 	}
 
+	// If utreexo bridgenode is enabled, init the bridgenode related things
 	if b.utreexo {
-		b.UtreexoBS, err = RestoreUtreexoBridgeState(b.utreexoBSPath)
+		b.UtreexoBS, err = RestoreUtreexoBridgeState(filepath.Join(b.dataDir, "bridge_data"))
 		if err != nil {
 			return err
 		}
@@ -1843,8 +1891,8 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 		for currentHeight < maxHeight {
 			err = binary.Read(pf.offsetState.file, binary.BigEndian, &pf.currentOffset)
 			if err != nil {
-				fmt.Printf("couldn't populate in-ram offsets on startup")
-				return err
+				str := fmt.Sprintf("Err %s: couldn't populate in-ram offsets on startup", err)
+				return fmt.Errorf(str)
 			}
 			pf.offsets[currentHeight] = pf.currentOffset
 			currentHeight++

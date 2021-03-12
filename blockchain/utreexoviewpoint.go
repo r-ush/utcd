@@ -5,6 +5,9 @@
 package blockchain
 
 import (
+	"bytes"
+
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
 	"github.com/mit-dci/utreexo/btcacc"
@@ -155,6 +158,39 @@ func UBlockToStxos(ublock *btcutil.UBlock, stxos *[]SpentTxOut) error {
 	}
 
 	return nil
+}
+
+// CompareRoots takes in the given slice of root hashes and compares them
+// to the utreexoViewpoint of this BlockChain instance.
+func (b *BlockChain) CompareRoots(compRoots []*chainhash.Hash) bool {
+	accRoots := make([]accumulator.Hash, len(compRoots))
+
+	for i, compRoot := range compRoots {
+		accRoots[i] = accumulator.Hash(*compRoot)
+	}
+
+	return b.utreexoViewpoint.compareRoots(accRoots)
+}
+
+// compareRoots is the underlying method that calls the utreexo accumulator code
+func (uview *UtreexoViewpoint) compareRoots(compRoot []accumulator.Hash) bool {
+	uviewRoots := uview.accumulator.GetRoots()
+
+	if len(uviewRoots) != len(compRoot) {
+		log.Criticalf("Length of the given roots differs from the one" +
+			"fetched from the utreexoViewpoint.")
+		return false
+	}
+
+	for i, root := range compRoot {
+		if !bytes.Equal(root[:], uviewRoots[i][:]) {
+			log.Debugf("The compared Utreexo roots differ."+
+				"Passed in root:%x\nRoot from utreexoViewpoint:%x\n", root, uviewRoots[i])
+			return false
+		}
+	}
+
+	return true
 }
 
 // NewUtreexoViewpoint returns an empty UtreexoViewpoint

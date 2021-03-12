@@ -98,11 +98,18 @@ func btcdMain(serverChan chan<- *server) error {
 		return nil
 	}
 
-	// Load the block database.
-	db, err := loadBlockDB()
-	if err != nil {
-		btcdLog.Errorf("%v", err)
-		return err
+	// We don't need a db for the UtreexoRootVerifyHeight mode
+	var db database.DB
+	if cfg.UtreexoRootVerifyHeight < 0 {
+		// Load the block database.
+		var err error
+		db, err = loadBlockDB()
+		if err != nil {
+			btcdLog.Errorf("%v", err)
+			return err
+		}
+	} else {
+		db = nil
 	}
 
 	// Return now if an interrupt signal was triggered.
@@ -120,48 +127,51 @@ func btcdMain(serverChan chan<- *server) error {
 		return err
 	}
 
-	defer func() error {
-		// Ensure the database is sync'd and closed on shutdown.
-		btcdLog.Infof("Gracefully shutting down the database...")
+	// Just quit for UtreexoRootVerifyHeight mode
+	if cfg.UtreexoRootVerifyHeight < 0 {
+		defer func() error {
+			// Ensure the database is sync'd and closed on shutdown.
+			btcdLog.Infof("Gracefully shutting down the database...")
 
-		// UtreexoCSN should be closed before the database close
-		if cfg.UtreexoCSN {
-			err = server.chain.FlushMemBlockStore()
-			if err != nil {
-				return err
+			// UtreexoCSN should be closed before the database close
+			if cfg.UtreexoCSN {
+				err = server.chain.FlushMemBlockStore()
+				if err != nil {
+					return err
+				}
+
+				err = server.chain.FlushMemBestState()
+				if err != nil {
+					return err
+				}
+
+				err = server.chain.PutUtreexoView()
+
+				if err != nil {
+					return err
+				}
+			}
+			db.Close()
+
+			// Utreexo bridgenode stuff should be closed after the database close
+			if cfg.Utreexo {
+				// TODO add saving the utreexo proofs and forest here
+				err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
+				if err != nil {
+					return err
+				}
 			}
 
-			err = server.chain.FlushMemBestState()
-			if err != nil {
-				return err
-			}
+			return nil
+		}()
 
-			err = server.chain.PutUtreexoView()
-
-			if err != nil {
-				return err
-			}
-		}
-		db.Close()
-
-		// Utreexo bridgenode stuff should be closed after the database close
-		if cfg.Utreexo {
-			// TODO add saving the utreexo proofs and forest here
-			err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}()
-
-	defer func() {
-		btcdLog.Infof("Gracefully shutting down the server...")
-		server.Stop()
-		server.WaitForShutdown()
-		srvrLog.Infof("Server shutdown complete")
-	}()
+		defer func() {
+			btcdLog.Infof("Gracefully shutting down the server...")
+			server.Stop()
+			server.WaitForShutdown()
+			srvrLog.Infof("Server shutdown complete")
+		}()
+	}
 	server.Start()
 	if serverChan != nil {
 		serverChan <- server

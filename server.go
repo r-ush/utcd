@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -64,7 +63,7 @@ const (
 var (
 	// userAgentName is the user agent name and is used to help identify
 	// ourselves to other bitcoin peers.
-	userAgentName = "utreexo"
+	userAgentName = "csn"
 
 	// userAgentVersion is the user agent version and is used to help
 	// identify ourselves to other bitcoin peers.
@@ -2572,7 +2571,14 @@ func (s *server) Start() {
 		return
 	}
 
-	srvrLog.Trace("Starting server")
+	// If the server is to verify a range of blocks based on the
+	// utreexo roots, only check those and exit
+	if cfg.UtreexoRootVerifyHeight > 0 {
+		srvrLog.Infof("Starting verification of the root: %v",
+			cfg.UtreexoRootVerifyHeight)
+	} else {
+		srvrLog.Trace("Starting server")
+	}
 
 	// Server startup time. Used for the uptime command for uptime calculation.
 	s.startupTime = time.Now().Unix()
@@ -2622,13 +2628,16 @@ func (s *server) Stop() error {
 		s.rpcServer.Stop()
 	}
 
-	// Save fee estimator state in the database.
-	s.db.Update(func(tx database.Tx) error {
-		metadata := tx.Metadata()
-		metadata.Put(mempool.EstimateFeeDatabaseKey, s.feeEstimator.Save())
+	// Only access the database if we're not in the utreexo root verify mode
+	if s.chain.UtreexoRootBeingVerified() == nil {
+		// Save fee estimator state in the database.
+		s.db.Update(func(tx database.Tx) error {
+			metadata := tx.Metadata()
+			metadata.Put(mempool.EstimateFeeDatabaseKey, s.feeEstimator.Save())
 
-		return nil
-	})
+			return nil
+		})
+	}
 
 	// Signal the remaining goroutines to quit.
 	close(s.quit)
@@ -2945,50 +2954,75 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		checkpoints = mergeCheckpoints(s.chainParams.Checkpoints, cfg.addCheckpoints)
 	}
 
+	// Set assumevalid. If assumevalid was turned off, the assumevalidhash will be nil
+	var assumevalidHash *chainhash.Hash
+	if !cfg.NoAssumeValid {
+		assumevalidHash = s.chainParams.AssumeValid
+	}
+
+	// Set Utreexo rootHints. Greater than 0 means the user has set a verify height
+	var utreexoRootToVerify *chaincfg.UtreexoRootHint
+	if cfg.UtreexoRootVerifyHeight > 0 {
+		// Grab the correct root to verify
+		for _, utreexoRootHint := range s.chainParams.UtreexoRootHints {
+			if utreexoRootHint.Height == int32(cfg.UtreexoRootVerifyHeight) {
+				utreexoRootToVerify = &utreexoRootHint
+				break
+			}
+		}
+	} else {
+		utreexoRootToVerify = nil
+	}
+
 	// Create a new block chain instance with the appropriate configuration.
 	var err error
 	s.chain, err = blockchain.New(&blockchain.Config{
-		DB:               s.db,
-		UtxoCacheMaxSize: uint64(cfg.UtxoCacheMaxSizeMiB) * 1024 * 1024,
-		Interrupt:        interrupt,
-		ChainParams:      s.chainParams,
-		Checkpoints:      checkpoints,
-		TimeSource:       s.timeSource,
-		SigCache:         s.sigCache,
-		IndexManager:     indexManager,
-		HashCache:        s.hashCache,
-		Utreexo:          cfg.Utreexo,
-		UtreexoBSPath:    filepath.Join(cfg.DataDir, "bridge_data"),
-		DataDir:          cfg.DataDir,
-		UtreexoCSN:       cfg.UtreexoCSN,
-		UtreexoLookAhead: cfg.UtreexoLookAhead,
-		TTL:              cfg.TTL,
+		DB:                  s.db,
+		UtxoCacheMaxSize:    uint64(cfg.UtxoCacheMaxSizeMiB) * 1024 * 1024,
+		Interrupt:           interrupt,
+		ChainParams:         s.chainParams,
+		Checkpoints:         checkpoints,
+		TimeSource:          s.timeSource,
+		SigCache:            s.sigCache,
+		IndexManager:        indexManager,
+		HashCache:           s.hashCache,
+		Utreexo:             cfg.Utreexo,
+		DataDir:             cfg.DataDir,
+		UtreexoCSN:          cfg.UtreexoCSN,
+		UtreexoLookAhead:    cfg.UtreexoLookAhead,
+		TTL:                 cfg.TTL,
+		UtreexoRootToVerify: utreexoRootToVerify,
+		UtreexoRootHints:    s.chainParams.UtreexoRootHints,
+		AssumeValidHash:     assumevalidHash,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Search for a FeeEstimator state in the database. If none can be found
-	// or if it cannot be loaded, create a new one.
-	db.Update(func(tx database.Tx) error {
-		metadata := tx.Metadata()
-		feeEstimationData := metadata.Get(mempool.EstimateFeeDatabaseKey)
-		if feeEstimationData != nil {
-			// delete it from the database so that we don't try to restore the
-			// same thing again somehow.
-			metadata.Delete(mempool.EstimateFeeDatabaseKey)
+	// Only access the database if we're not in utreexo root verify mode
+	if utreexoRootToVerify == nil {
+		// Search for a FeeEstimator state in the database. If none can be found
+		// or if it cannot be loaded, create a new one.
+		db.Update(func(tx database.Tx) error {
+			metadata := tx.Metadata()
+			feeEstimationData := metadata.Get(mempool.EstimateFeeDatabaseKey)
+			if feeEstimationData != nil {
+				// delete it from the database so that we don't try to restore the
+				// same thing again somehow.
+				metadata.Delete(mempool.EstimateFeeDatabaseKey)
 
-			// If there is an error, log it and make a new fee estimator.
-			var err error
-			s.feeEstimator, err = mempool.RestoreFeeEstimator(feeEstimationData)
+				// If there is an error, log it and make a new fee estimator.
+				var err error
+				s.feeEstimator, err = mempool.RestoreFeeEstimator(feeEstimationData)
 
-			if err != nil {
-				peerLog.Errorf("Failed to restore fee estimator %v", err)
+				if err != nil {
+					peerLog.Errorf("Failed to restore fee estimator %v", err)
+				}
 			}
-		}
 
-		return nil
-	})
+			return nil
+		})
+	}
 
 	// If no feeEstimator has been found, or if the one that has been found
 	// is behind somehow, create a new one and start over.

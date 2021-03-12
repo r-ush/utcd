@@ -18,3 +18,5 @@ require (
 go 1.15
 
 replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498
+
+replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20210311100244-27161d480ed0
