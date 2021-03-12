@@ -10,6 +10,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/database"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
 
@@ -127,6 +128,66 @@ func (b *BlockChain) processOrphans(hash *chainhash.Hash, flags BehaviorFlags) e
 		}
 	}
 	return nil
+}
+
+// ProcessHeaders loops through all the headers. None are saved if even one
+// header is deemed invalid
+// No headers are saved to disk as there is no need to keep a state of the
+// block index since we don't resume for utreexo root verify mode.
+func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders) error {
+	var err error
+	for _, header := range headers.Headers {
+		err = b.maybeAcceptHeader(header)
+		if err != nil {
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+// ProcessHeaderUBlock is the main function for verifying blocks for the utreeso root verify mode.
+// No state is saved during this process.
+func (b *BlockChain) ProcessHeaderUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, bool, error) {
+	log.Tracef("Enter Processing ublock")
+
+	if b.utreexoQuit {
+		log.Infof("UTREEXOQUIT: Quit is received")
+		return true, false, nil
+	}
+	b.chainLock.Lock()
+	defer b.chainLock.Unlock()
+
+	blockHash := ublock.Hash()
+	log.Tracef("Processing ublock %v", blockHash)
+
+	// The block must not already exist in the main chain or side chains.
+	exists, err := b.blockExists(blockHash)
+	if err != nil {
+		return false, false, err
+	}
+	if !exists {
+		str := fmt.Sprintf("unknown ublock %v", blockHash)
+		return false, false, fmt.Errorf(str)
+	}
+
+	// Perform preliminary sanity checks on the block and its transactions.
+	err = checkBlockSanity(ublock.Block(), b.chainParams.PowLimit, b.timeSource, flags)
+	if err != nil {
+		return false, false, err
+	}
+
+	// The block has passed all context independent checks and appears sane
+	// enough to potentially accept it into the block chain.
+	isMainChain, err := b.maybeAcceptHeaderUBlock(ublock, flags)
+	if err != nil {
+		return false, false, err
+	}
+
+	log.Debugf("Accepted ublock %v", blockHash)
+
+	return isMainChain, false, nil
 }
 
 // ProcessBlock is the main workhorse for handling insertion of new blocks into

@@ -8,6 +8,7 @@ import (
 	"container/list"
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -188,6 +189,101 @@ func limitAdd(m map[chainhash.Hash]struct{}, hash chainhash.Hash, limit int) {
 		}
 	}
 	m[hash] = struct{}{}
+}
+
+// ValidateUtreexoRoot validates the given utreexo root
+func (sm *SyncManager) ValidateUtreexoRoot() error {
+	rootToVerify := sm.chain.UtreexoRootBeingVerified()
+
+	// The block height that we wanna verify to
+	endHeight := rootToVerify.Height
+
+	// Eh whatever just say segwitisAcitve and only ask for segwit peers
+	segwitActive := true
+
+	var higherPeers, equalPeers []*peerpkg.Peer
+	for peer, state := range sm.peerStates {
+		if !state.syncCandidate {
+			continue
+		}
+
+		if segwitActive && !peer.IsWitnessEnabled() {
+			log.Debugf("peer %v not witness enabled, skipping", peer)
+			continue
+		}
+
+		// Remove sync candidate peers that are no longer candidates due
+		// to passing their latest known block.  NOTE: The < is
+		// intentional as opposed to <=.  While technically the peer
+		// doesn't have a later block when it's equal, it will likely
+		// have one soon so it is a reasonable choice.  It also allows
+		// the case where both are at 0 such as during regression test.
+		if peer.LastBlock() < endHeight {
+			state.syncCandidate = false
+			continue
+		}
+
+		// If the peer is at the same height as us, we'll add it a set
+		// of backup peers in case we do not find one with a higher
+		// height. If we are synced up with all of our peers, all of
+		// them will be in this set.
+		if peer.LastBlock() == endHeight {
+			equalPeers = append(equalPeers, peer)
+			continue
+		}
+
+		// This peer has a height greater than our own, we'll consider
+		// it in the set of better peers from which we'll randomly
+		// select.
+		higherPeers = append(higherPeers, peer)
+	}
+
+	// Pick randomly from the set of peers greater than our block height,
+	// falling back to a random peer of the same height if none are greater.
+	//
+	// TODO(conner): Use a better algorithm to ranking peers based on
+	// observed metrics and/or sync in parallel.
+	var bestPeer *peerpkg.Peer
+	switch {
+	case len(higherPeers) > 0:
+		bestPeer = higherPeers[rand.Intn(len(higherPeers))]
+
+	case len(equalPeers) > 0:
+		bestPeer = equalPeers[rand.Intn(len(equalPeers))]
+	}
+
+	best := sm.chain.BestSnapshot()
+	// Start syncing from the best peer if one was selected.
+	if bestPeer != nil {
+		sm.utreexoRootVerifyMode = true
+		sm.headersFirstMode = true
+
+		locator, err := sm.chain.LatestBlockLocator()
+		if err != nil {
+			log.Errorf("Failed to get block locator for the "+
+				"latest block: %v", err)
+			return err
+		}
+
+		if sm.chainParams != &chaincfg.RegressionNetParams {
+			bestPeer.PushGetHeadersMsg(locator, &chainhash.Hash{})
+			sm.headersFirstMode = true
+			log.Infof("Downloading headers for blocks %d to "+
+				"%d from peer %s", best.Height+1,
+				rootToVerify.Height, bestPeer.Addr())
+		}
+
+		sm.syncPeer = bestPeer
+
+		// Reset the last progress time now that we have a non-nil
+		// syncPeer to avoid instantly detecting it as stalled in the
+		// event the progress time hasn't been updated recently.
+		sm.lastProgressTime = time.Now()
+	} else {
+		log.Warnf("No sync peer candidates available")
+	}
+
+	return nil
 }
 
 // syncWorker is a single worker for parallel block sync for utreexo
@@ -939,10 +1035,12 @@ type SyncManager struct {
 
 	// The following fields are used for headers-first mode.
 	headersFirstMode bool
-	utreexoCSN       bool
 	headerList       *list.List
 	startHeader      *list.Element
 	nextCheckpoint   *chaincfg.Checkpoint
+
+	utreexoCSN            bool
+	utreexoRootVerifyMode bool
 
 	// An optional fee estimator.
 	feeEstimator *mempool.FeeEstimator
@@ -1002,6 +1100,13 @@ func (sm *SyncManager) findNextHeaderCheckpoint(height int32) *chaincfg.Checkpoi
 func (sm *SyncManager) startSync() {
 	// Return now if we're already syncing.
 	if sm.syncPeer != nil {
+		return
+	}
+
+	// If we are verifying a utreexo root range, then call ValidateUtreexoRoot()
+	// and return. We keep a separate process for the root range verify
+	if sm.chain.UtreexoRootBeingVerified() != nil {
+		sm.ValidateUtreexoRoot()
 		return
 	}
 
@@ -1643,6 +1748,117 @@ func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
 		}
 	}
 
+	// We have a separate process for utreexoRootVerify mode
+	if sm.utreexoRootVerifyMode {
+		behaviorFlags := blockchain.BFNone
+		//behaviorFlags |= blockchain.BFFastAdd
+
+		// Remove block from request maps. Either chain will know about it and
+		// so we shouldn't have any more instances of trying to fetch it, or we
+		// will fail the insert and thus we'll retry next time we get an inv.
+		delete(state.requestedBlocks, *blockHash)
+		delete(sm.requestedBlocks, *blockHash)
+
+		// Process the block to include validation, best chain selection, orphan
+		// handling, etc.
+		// It's always the main chain because we do the headers sync first
+
+		_, _, err := sm.chain.ProcessHeaderUBlock(ubmsg.ublock, behaviorFlags)
+		if err != nil {
+			// When the error is a rule error, it means the block was simply
+			// rejected as opposed to something actually going wrong, so log
+			// it as such.  Otherwise, something really did go wrong, so log
+			// it as an actual error.
+			if _, ok := err.(blockchain.RuleError); ok {
+				log.Infof("Rejected ublock %v from %s: %v", blockHash,
+					peer, err)
+			} else {
+				log.Errorf("Failed to process ublock %v: %v",
+					blockHash, err)
+			}
+			if dbErr, ok := err.(database.Error); ok && dbErr.ErrorCode ==
+				database.ErrCorruption {
+				panic(dbErr)
+			}
+
+			// Convert the error into an appropriate reject message and
+			// send it.
+			code, reason := mempool.ErrToRejectErr(err)
+			peer.PushRejectMsg(wire.CmdUBlock, code, reason, blockHash, false)
+			return
+		}
+
+		rootToVerify := sm.chain.UtreexoRootBeingVerified()
+		if ubmsg.ublock.Height() == rootToVerify.Height {
+			if sm.chain.CompareRoots(rootToVerify.Roots) {
+				log.Infof("Utreexo root verified at height %v",
+					ubmsg.ublock.Height())
+				pid := os.Getpid()
+				p, _ := os.FindProcess(pid)
+				p.Signal(os.Interrupt)
+				//os.Exit(0)
+			} else {
+				log.Warnf("Utreexo root invalid at height %v",
+					ubmsg.ublock.Height())
+				pid := os.Getpid()
+				p, _ := os.FindProcess(pid)
+				p.Signal(os.Interrupt)
+				//os.Exit(1)
+			}
+		}
+
+		// Meta-data about the new block this peer is reporting. We use this
+		// below to update this peer's latest block height and the heights of
+		// other peers based on their last announced block hash. This allows us
+		// to dynamically update the block heights of peers, avoiding stale
+		// heights when looking for a new sync peer. Upon acceptance of a block
+		// or recognition of an orphan, we also use this information to update
+		// the block heights over other peers who's invs may have been ignored
+		// if we are actively syncing while the chain is not yet current or
+		// who may have lost the lock announcement race.
+		var heightUpdate int32
+		var blkHashUpdate *chainhash.Hash
+
+		if peer == sm.syncPeer {
+			sm.lastProgressTime = time.Now()
+		}
+
+		// Something for compatibility with the existing LogBlockHeight method
+		block := ubmsg.ublock.Block()
+
+		// When the block is not an orphan, log information about it and
+		// update the chain state.
+		sm.progressLogger.LogBlockHeight(block, sm.chain)
+
+		// Update this peer's latest block height, for future
+		// potential sync node candidacy.
+		best := sm.chain.BestSnapshot()
+		heightUpdate = best.Height
+		blkHashUpdate = &best.Hash
+
+		// Clear the rejected transactions.
+		sm.rejectedTxns = make(map[chainhash.Hash]struct{})
+
+		// Update the block height for this peer. But only send a message to
+		// the server for updating peer heights if this is an orphan or our
+		// chain is "current". This avoids sending a spammy amount of messages
+		// if we're syncing the chain from scratch.
+		if blkHashUpdate != nil && heightUpdate != 0 {
+			peer.UpdateLastBlockHeight(heightUpdate)
+			if sm.current() {
+				go sm.peerNotifier.UpdatePeerHeights(blkHashUpdate, heightUpdate,
+					peer)
+			}
+		}
+
+		if sm.startHeader != nil &&
+			len(state.requestedBlocks) < minInFlightBlocks {
+			sm.fetchHeaderVerifyUBlocks()
+		}
+
+		return
+	}
+
 	// When in headers-first mode, if the block matches the hash of the
 	// first header in the list of headers that are being fetched, it's
 	// eligible for less validation since the headers have already been
@@ -1908,6 +2124,65 @@ func (sm *SyncManager) fetchHeaderBlocks() {
 
 // fetchHeaderUBlocks creates and sends a request to the syncPeer for the next
 // list of blocks to be downloaded based on the current list of headers.
+func (sm *SyncManager) fetchHeaderVerifyUBlocks() {
+	// Nothing to do if there is no start header.
+	if sm.startHeader == nil {
+		log.Warnf("fetchHeaderUBlocks called with no start header")
+		return
+	}
+
+	// Build up a getdata request for the list of blocks the headers
+	// describe.  The size hint will be limited to wire.MaxInvPerMsg by
+	// the function, so no need to double check it here.
+	gdmsg := wire.NewMsgGetDataSizeHint(uint(sm.headerList.Len()))
+	numRequested := 0
+	for e := sm.startHeader; e != nil; e = e.Next() {
+		node, ok := e.Value.(*headerNode)
+		if !ok {
+			log.Warn("Header list node type is not a headerNode")
+			continue
+		}
+
+		// If we have a root that we're doing the verify from, then
+		// skip all the blocks that are less than the height for the
+		// root.
+		if sm.chain.UtreexoStartRoot() != nil {
+			if node.height <= sm.chain.UtreexoStartRoot().Height {
+				continue
+			}
+		}
+		iv := wire.NewInvVect(wire.InvTypeUBlock, node.hash)
+		syncPeerState := sm.peerStates[sm.syncPeer]
+
+		sm.requestedBlocks[*node.hash] = struct{}{}
+		syncPeerState.requestedBlocks[*node.hash] = struct{}{}
+
+		// If we're fetching from a witness enabled peer
+		// post-fork, then ensure that we receive all the
+		// witness data in the blocks.
+		if sm.syncPeer.IsWitnessEnabled() {
+			if sm.utreexoCSN {
+				iv.Type = wire.InvTypeWitnessUBlock
+			} else {
+				iv.Type = wire.InvTypeWitnessBlock
+			}
+		}
+
+		gdmsg.AddInvVect(iv)
+		numRequested++
+
+		sm.startHeader = e.Next()
+		if numRequested >= wire.MaxInvPerMsg {
+			break
+		}
+	}
+	if len(gdmsg.InvList) > 0 {
+		sm.syncPeer.QueueMessage(gdmsg, nil)
+	}
+}
+
+// fetchHeaderUBlocks creates and sends a request to the syncPeer for the next
+// list of blocks to be downloaded based on the current list of headers.
 func (sm *SyncManager) fetchHeaderUBlocks() {
 	// Nothing to do if there is no start header.
 	if sm.startHeader == nil {
@@ -1971,6 +2246,80 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 	_, exists := sm.peerStates[peer]
 	if !exists {
 		log.Warnf("Received headers message from unknown peer %s", peer)
+		return
+	}
+
+	if sm.utreexoRootVerifyMode {
+		err := sm.chain.ProcessHeaders(hmsg.headers)
+		if err != nil {
+			log.Warnf("Got invalid headers from %s -- "+
+				"disconnecting", peer.Addr())
+			peer.Disconnect()
+			return
+		}
+
+		var finalHash *chainhash.Hash
+		receivedAllHeaders := false
+		for _, blockHeader := range hmsg.headers.Headers {
+			blockHash := blockHeader.BlockHash()
+			finalHash = &blockHash
+
+			// Ensure there is a previous header to compare against.
+			prevNodeEl := sm.headerList.Back()
+			if prevNodeEl == nil {
+				log.Warnf("Header list does not contain a previous" +
+					"element as expected -- disconnecting peer")
+				peer.Disconnect()
+				return
+			}
+			// Ensure the header properly connects to the previous one and
+			// add it to the list of headers.
+			node := headerNode{hash: &blockHash}
+			prevNode := prevNodeEl.Value.(*headerNode)
+			if prevNode.hash.IsEqual(&blockHeader.PrevBlock) {
+				node.height = prevNode.height + 1
+				e := sm.headerList.PushBack(&node)
+				if sm.startHeader == nil {
+					sm.startHeader = e
+				}
+			} else {
+				log.Warnf("Received block header that does not "+
+					"properly connect to the chain from peer %s "+
+					"-- disconnecting", peer.Addr())
+				peer.Disconnect()
+				return
+			}
+
+			if node.height == sm.chain.UtreexoRootBeingVerified().Height {
+				receivedAllHeaders = true
+				log.Infof("Downloaded all headers "+
+					"to root being verified at height "+
+					"%d/hash %s", node.height, node.hash)
+			}
+		}
+
+		if receivedAllHeaders {
+			// Since the first entry of the list is always the final block
+			// that is already in the database and is only used to ensure
+			// the next header links properly, it must be removed before
+			// fetching the blocks.
+			sm.headerList.Remove(sm.headerList.Front())
+			log.Infof("Received %v block headers: Fetching blocks",
+				sm.headerList.Len())
+			sm.progressLogger.SetLastLogTime(time.Now())
+			sm.fetchHeaderVerifyUBlocks()
+			return
+		}
+
+		locator := blockchain.BlockLocator([]*chainhash.Hash{finalHash})
+		err = peer.PushGetHeadersMsg(locator, &chainhash.Hash{})
+		if err != nil {
+			log.Warnf("Failed to send getheaders message to "+
+				"peer %s: %v", peer.Addr(), err)
+			return
+		}
+
+		// Return here for utreexoRootVerifyMode
 		return
 	}
 
@@ -2858,6 +3207,12 @@ func New(config *Config) (*SyncManager, error) {
 		}
 	} else {
 		log.Info("Checkpoints are disabled")
+		if sm.chain.UtreexoRootBeingVerified() != nil {
+			// Push back the genesis header to the headerList
+			best := sm.chain.BestSnapshot()
+			node := headerNode{height: best.Height, hash: &best.Hash}
+			sm.headerList.PushBack(&node)
+		}
 	}
 
 	sm.chain.Subscribe(sm.handleBlockchainNotification)
