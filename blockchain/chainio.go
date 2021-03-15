@@ -450,8 +450,11 @@ func decodeSpentTxOut(serialized []byte, stxo *SpentTxOut) (int, error) {
 
 	index, bytesRead := deserializeVLQ(serialized[offset:])
 	stxo.Index = int16(index) // NOTE Since the original value is uint16, this should be fine
-	stxo.TTL = int32(index)
 	offset += bytesRead
+
+	ttl, bytesReadTTL := deserializeVLQ(serialized[offset:])
+	stxo.TTL = int32(ttl)
+	offset += bytesReadTTL
 
 	// Decode the compressed txout.
 	amount, pkScript, bytesRead, err := decodeCompressedTxOut(

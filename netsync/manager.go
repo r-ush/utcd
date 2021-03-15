@@ -1765,27 +1765,8 @@ func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
 
 		_, _, err := sm.chain.ProcessHeaderUBlock(ubmsg.ublock, behaviorFlags)
 		if err != nil {
-			// When the error is a rule error, it means the block was simply
-			// rejected as opposed to something actually going wrong, so log
-			// it as such.  Otherwise, something really did go wrong, so log
-			// it as an actual error.
-			if _, ok := err.(blockchain.RuleError); ok {
-				log.Infof("Rejected ublock %v from %s: %v", blockHash,
-					peer, err)
-			} else {
-				log.Errorf("Failed to process ublock %v: %v",
-					blockHash, err)
-			}
-			if dbErr, ok := err.(database.Error); ok && dbErr.ErrorCode ==
-				database.ErrCorruption {
-				panic(dbErr)
-			}
-
-			// Convert the error into an appropriate reject message and
-			// send it.
-			code, reason := mempool.ErrToRejectErr(err)
-			peer.PushRejectMsg(wire.CmdUBlock, code, reason, blockHash, false)
-			return
+			// just panic. It's fine to restart the range verification.
+			panic(err)
 		}
 
 		rootToVerify := sm.chain.UtreexoRootBeingVerified()

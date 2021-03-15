@@ -50,6 +50,8 @@ github.com/mit-dci/utreexo v0.0.0-20210113220559-fe368b8feff3 h1:cwTBVWcYOvNbZrx
 github.com/mit-dci/utreexo v0.0.0-20210113220559-fe368b8feff3/go.mod h1:Fkwf5QjCAkJxTCWWARKviyBWIX4v2NRcFsd0f0eZZjs=
 github.com/mit-dci/utreexo v0.0.0-20210222154807-259fc1a7bf87 h1:BF7YuGh+385ZsF20Og2Ud6ilMt/3Dm66kp5VTuZNwTI=
 github.com/mit-dci/utreexo v0.0.0-20210222154807-259fc1a7bf87/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
+github.com/mit-dci/utreexo v0.0.0-20210315015810-f7abca0043fb h1:w0T1np3507GYvqzupRmDBKVEeXzxm+0Rxs5JJCx64UQ=
+github.com/mit-dci/utreexo v0.0.0-20210315015810-f7abca0043fb/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.7.0 h1:WSHQ+IS43OoUrWtD1/bbclrwK8TTH5hzp+umCiuxHgs=
 github.com/onsi/ginkgo v1.7.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=

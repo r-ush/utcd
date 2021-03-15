@@ -43,7 +43,7 @@ func (view *UtxoViewpoint) getEntry(outpoint wire.OutPoint) (*UtxoEntry, error) 
 	return view.LookupEntry(outpoint), nil
 }
 
-//TODO(stevenroose) copy documentation.
+// TODO(stevenroose) copy documentation.
 // This method is part of the utxoView interface.
 func (view *UtxoViewpoint) addEntry(outpoint wire.OutPoint, entry *UtxoEntry, overwrite bool) error {
 	view.entries[outpoint] = entry

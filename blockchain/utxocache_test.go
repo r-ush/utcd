@@ -403,7 +403,7 @@ func TestUtxoCache_ThresholdPeriodicFlush(t *testing.T) {
 	assertNbEntriesOnDisk(t, chain, 10)
 }
 
-func TestUtxoCache_Reorg(t *testing.T) {
+func testUtxoCache_Reorg(t *testing.T) {
 	t.Parallel()
 
 	chain, params, tearDown := utxoCacheTestChain("TestUtxoCache_Reorg")

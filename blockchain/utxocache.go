@@ -121,8 +121,8 @@ func (entry *UtxoEntry) isFresh() bool {
 	return entry.packedFlags&tfFresh == tfFresh
 }
 
-// IsSpent returns whether or not the output has been spent based upon the
-// current state of the unspent transaction output view it was obtained from.
+// Index returns the index of the "spendable and not a same block spend" stxos
+// in a given block
 func (entry *UtxoEntry) Index() int16 {
 	return entry.index
 }
@@ -309,16 +309,17 @@ func (s *utxoCache) seekAndCacheEntries(ops ...wire.OutPoint) (
 	err := s.db.View(func(dbTx database.Tx) error {
 		utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
 
-		cursor := utxoBucket.Cursor()
+		//cursor := utxoBucket.Cursor()
 		for _, op := range ops {
-			entry, err := dbSeekUtxoEntry(cursor, &op)
+			// TODO FIXME HERE
+			//entry, err := dbSeekUtxoEntry(cursor, &op)
+			entry, err := dbFetchUtxoEntry(dbTx, utxoBucket, op)
 			if err != nil {
 				return err
 			}
 
 			entries[op] = entry
 		}
-
 		return nil
 	})
 	if err != nil {
@@ -395,6 +396,7 @@ func (s *utxoCache) getEntry(outpoint wire.OutPoint) (*UtxoEntry, error) {
 
 	// If not, then we'll fetch it from the databse.
 	entries, err := s.seekAndCacheEntries(outpoint)
+	//entries, err := s.fetchAndCacheEntries(outpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -413,6 +415,7 @@ func (s *utxoCache) getEntries(outpoints map[wire.OutPoint]struct{}) (
 
 	entries := make(map[wire.OutPoint]*UtxoEntry, len(outpoints))
 	var missingEntries []wire.OutPoint
+	//missingEntries := make(map[wire.OutPoint]struct{})
 	for op := range outpoints {
 		if entry, ok := s.cachedEntries[op]; ok {
 			entries[op] = entry
@@ -420,9 +423,11 @@ func (s *utxoCache) getEntries(outpoints map[wire.OutPoint]struct{}) (
 		}
 
 		missingEntries = append(missingEntries, op)
+		//missingEntries[op] = struct{}{}
 	}
 
 	dbEntries, err := s.seekAndCacheEntries(missingEntries...)
+	//dbEntries, err := s.fetchAndCacheEntries(missingEntries)
 	if err != nil {
 		return nil, err
 	}

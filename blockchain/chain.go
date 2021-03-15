@@ -1585,7 +1585,7 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 	// work for this new side chain is not enough to make it the new chain.
 	if node.workSum.Cmp(b.bestChain.Tip().workSum) <= 0 {
 		if b.utreexoRootToVerify != nil {
-			return false, fmt.Errorf("Block %x causes a fork",
+			return false, fmt.Errorf("Block %v causes a fork",
 				node.hash)
 		}
 		// Log information about how the block is forking the chain.
