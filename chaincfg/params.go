@@ -72,6 +72,55 @@ type UtreexoRootHint struct {
 	Roots []*chainhash.Hash
 }
 
+// FindPreviousUtreexoRootHint returns the previous Utreexo root hint
+func FindPreviousUtreexoRootHint(height int32, roots []UtreexoRootHint) *UtreexoRootHint {
+	if len(roots) == 0 {
+		return nil
+	}
+
+	// There is no previous root if the height is already after the first
+	// root.
+	firstRoot := &roots[0]
+	if height <= firstRoot.Height {
+		return nil
+	}
+
+	// Find the previous root.
+	previousRoot := firstRoot
+	for i := 1; i < len(roots); i++ {
+		if height <= roots[i].Height {
+			break
+		}
+		previousRoot = &roots[i]
+	}
+
+	return previousRoot
+}
+
+// FindNextUtreexoRootHint returns the next Utreexo root hint
+func FindNextUtreexoRootHint(height int32, roots []UtreexoRootHint) *UtreexoRootHint {
+	if len(roots) == 0 {
+		return nil
+	}
+
+	// There is no next root if the height is already after the final
+	// root.
+	finalRoot := &roots[len(roots)-1]
+	if height >= finalRoot.Height {
+		return nil
+	}
+
+	// Find the next root.
+	nextRoot := finalRoot
+	for i := len(roots) - 2; i >= 0; i-- {
+		if height >= roots[i].Height {
+			break
+		}
+		nextRoot = &roots[i]
+	}
+	return nextRoot
+}
+
 func newLeafHashFromStr(src string) *chainhash.Hash {
 	// Hex decoder expects the hash to be a multiple of two.  When not, pad
 	// with a leading zero.

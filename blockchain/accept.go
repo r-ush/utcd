@@ -7,13 +7,14 @@ package blockchain
 import (
 	"fmt"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
 
 // maybeAcceptHeader potentially accepts a block header to build the block index
-func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader) error {
+func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoot *chaincfg.UtreexoRootHint) error {
 	// Check if the previous block header exists
 	prevHash := &header.PrevBlock
 	prevNode := b.index.LookupNode(prevHash)
@@ -36,7 +37,7 @@ func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader) error {
 
 	// If we're in utreexo root verify mode and is
 	// verifying from the genesis, return here
-	if b.utreexoStartRoot == nil {
+	if utreexoStartRoot == nil {
 		return nil
 	}
 
@@ -44,9 +45,9 @@ func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader) error {
 	//
 	// TODO We're hashing twice per header here since there's a
 	// hash in checkBlockHeaderSanity
-	if header.BlockHash() == *b.utreexoStartRoot.Hash {
+	if header.BlockHash() == *utreexoStartRoot.Hash {
 		log.Infof("Setting the starting block to verify at height %v",
-			b.utreexoStartRoot.Height)
+			utreexoStartRoot.Height)
 		// This node is now the end of the best chain.
 		b.bestChain.SetTip(newNode)
 	}

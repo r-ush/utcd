@@ -880,7 +880,7 @@ func dbFetchUtxoEntry(dbTx database.Tx, utxoBucket database.Bucket,
 //
 // When there is no entry for the provided output, nil will be returned for both
 // the entry and the error.
-func dbSeekUtxoEntry(cursor database.Cursor, op *wire.OutPoint) (*UtxoEntry, error) {
+func dbSeekUtxoEntry(dbTx database.Tx, cursor database.Cursor, op *wire.OutPoint) (*UtxoEntry, error) {
 	key := outpointKey(*op)
 	exists := cursor.Seek(*key)
 	recycleOutpointKey(key)
@@ -923,6 +923,7 @@ func dbPutUtxoEntries(dbTx database.Tx, entries map[wire.OutPoint]*UtxoEntry) er
 	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
 
 	for outpoint, entry := range entries {
+		//fmt.Println("dbPut", outpoint.String())
 		if entry == nil || entry.IsSpent() {
 			return AssertError("trying to store nil or spent entry")
 		}
@@ -952,6 +953,7 @@ func dbDeleteUtxoEntries(dbTx database.Tx, outpoints []wire.OutPoint) error {
 	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
 
 	for _, outpoint := range outpoints {
+		//fmt.Println("dbDel", outpoint.String())
 		key := outpointKey(outpoint)
 		err := utxoBucket.Delete(*key)
 		recycleOutpointKey(key)
@@ -1380,6 +1382,35 @@ func (b *BlockChain) createChainState() error {
 // database.  When the db does not yet contain any chain state, both it and the
 // chain state are initialized to the genesis block.
 func (b *BlockChain) initChainState() error {
+	fmt.Println("b.utreexoRootVerifyMode", b.UtreexoRootVerifyMode)
+	if b.UtreexoRootVerifyMode {
+		// Create a new node from the genesis block and set it as the best node.
+		genesisBlock := btcutil.NewBlock(b.chainParams.GenesisBlock)
+		genesisBlock.SetHeight(0)
+		header := &genesisBlock.MsgBlock().Header
+		node := newBlockNode(header, nil)
+		node.status = statusDataStored | statusValid
+		b.bestChain.SetTip(node)
+
+		// Add the new node to the index which is used for faster lookups.
+		b.index.addNode(node)
+
+		// Initialize the state related to the best block.  Since it is the
+		// genesis block, use its timestamp for the median time.
+		numTxns := uint64(len(genesisBlock.MsgBlock().Transactions))
+		blockSize := uint64(genesisBlock.MsgBlock().SerializeSize())
+		blockWeight := uint64(GetBlockWeight(genesisBlock))
+		b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
+			numTxns, time.Unix(node.timestamp, 0))
+
+		// Create empty utreexoViewpoint
+		//b.utreexoViewpoint = NewUtreexoViewpoint()
+
+		b.memBlock = &memBlockStore{}
+		b.memBestState = &memBestState{}
+
+		return nil
+	}
 	// Skip all the other initialization if we're just verifing the utreexo root
 	// range. We don't save any state so this is fine.
 	if b.utreexoRootToVerify != nil {

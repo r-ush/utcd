@@ -305,14 +305,48 @@ func (s *utxoCache) seekAndCacheEntries(ops ...wire.OutPoint) (
 			ops[i].Index < ops[j].Index
 	})
 
+	//s.db.View(func(dbTx database.Tx) error {
+	//	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
+	//	cursor := utxoBucket.Cursor()
+	//	for ok := cursor.First(); ok; ok = cursor.Next() {
+	//		serializedUtxo := cursor.Value()
+
+	//		// Deserialize the utxo entry and return it.
+	//		entry, err := deserializeUtxoEntry(serializedUtxo)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		fmt.Println("HI", entry.Amount())
+	//		fmt.Println(entry.PkScript())
+	//	}
+	//	return nil
+
+	//})
+
 	entries := make(map[wire.OutPoint]*UtxoEntry, len(ops))
 	err := s.db.View(func(dbTx database.Tx) error {
 		utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
-
 		//cursor := utxoBucket.Cursor()
+		//for ok := cursor.First(); ok; ok = cursor.Next() {
+		//	serializedUtxo := cursor.Value()
+
+		//	// Deserialize the utxo entry and return it.
+		//	entry, err := deserializeUtxoEntry(serializedUtxo)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	fmt.Println("YO", entry.Amount())
+		//	fmt.Println(entry.PkScript())
+		//}
+		//for i, op := range ops {
+		//	fmt.Println(i)
+		//	oppkey := outpointKey(op)
+		//	exists := cursor.Seek(*oppkey)
+		//	fmt.Println("exists", exists)
+		//}
 		for _, op := range ops {
 			// TODO FIXME HERE
-			//entry, err := dbSeekUtxoEntry(cursor, &op)
+			//entry, err := dbSeekUtxoEntry(dbTx, cursor, &op)
 			entry, err := dbFetchUtxoEntry(dbTx, utxoBucket, op)
 			if err != nil {
 				return err
@@ -423,6 +457,7 @@ func (s *utxoCache) getEntries(outpoints map[wire.OutPoint]struct{}) (
 		}
 
 		missingEntries = append(missingEntries, op)
+		//fmt.Println("MISSING", op.String())
 		//missingEntries[op] = struct{}{}
 	}
 

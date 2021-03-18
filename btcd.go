@@ -35,6 +35,51 @@ var (
 // as a service and reacts accordingly.
 var winServiceMain func() (bool, error)
 
+func rootWorkerMain(interrupt <-chan struct{}) error {
+	// Enable http profiling server if requested.
+	if cfg.Profile != "" {
+		go func() {
+			listenAddr := net.JoinHostPort("", cfg.Profile)
+			btcdLog.Infof("Profile server listening on %s", listenAddr)
+			profileRedirect := http.RedirectHandler("/debug/pprof",
+				http.StatusSeeOther)
+			http.Handle("/", profileRedirect)
+			btcdLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
+		}()
+	}
+
+	// Write cpu profile if requested.
+	if cfg.CPUProfile != "" {
+		f, err := os.Create(cfg.CPUProfile)
+		if err != nil {
+			fmt.Println(err)
+			btcdLog.Errorf("Unable to create cpu profile: %v", err)
+			return err
+		}
+		pprof.StartCPUProfile(f)
+		defer f.Close()
+		defer pprof.StopCPUProfile()
+	}
+
+	mainNode, err := initMainNode(activeNetParams.Params, int32(runtime.NumCPU()*2))
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	mainNode.Start()
+
+	defer func() {
+		btcdLog.Infof("Gracefully shutting down the nodes...")
+		mainNode.Stop()
+		srvrLog.Infof("Server shutdown complete")
+	}()
+
+	<-interrupt
+
+	return nil
+}
+
 // btcdMain is the real main function for btcd.  It is necessary to work around
 // the fact that deferred functions do not run when os.Exit() is called.  The
 // optional serverChan parameter is mainly used by the service code to be
@@ -62,6 +107,10 @@ func btcdMain(serverChan chan<- *server) error {
 
 	// Show version at startup.
 	btcdLog.Infof("Version %s", version())
+
+	if cfg.UtreexoWorker {
+		return rootWorkerMain(interrupt)
+	}
 
 	// Enable http profiling server if requested.
 	if cfg.Profile != "" {
@@ -165,14 +214,28 @@ func btcdMain(serverChan chan<- *server) error {
 			return nil
 		}()
 
-		defer func() {
-			btcdLog.Infof("Gracefully shutting down the server...")
-			server.Stop()
-			server.WaitForShutdown()
-			srvrLog.Infof("Server shutdown complete")
-		}()
 	}
-	server.Start()
+	defer func() {
+		btcdLog.Infof("Gracefully shutting down the server...")
+		server.Stop()
+		server.WaitForShutdown()
+		srvrLog.Infof("Server shutdown complete")
+	}()
+
+	if cfg.UtreexoRootVerifyHeight > 0 {
+		verifyChan := make(chan bool)
+		server.StartUtreexoRootHintVerify(server.chain.UtreexoRootBeingVerified(), verifyChan)
+
+		verified := <-verifyChan
+		if verified {
+			fmt.Println("Utreexo root verified")
+		} else {
+			fmt.Println("Utreexo root invalid")
+		}
+		return nil
+	} else {
+		server.Start(nil)
+	}
 	if serverChan != nil {
 		serverChan <- server
 	}
@@ -348,7 +411,7 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	debug.SetGCPercent(20)
+	debug.SetGCPercent(50)
 
 	//f, err := os.Create("trace.out")
 	//if err != nil {
@@ -385,7 +448,7 @@ func main() {
 	}
 	//trace.Stop()
 	//runtime.GC()
-	//memf, _ := os.Create("memprof")
-	//pprof.WriteHeapProfile(memf)
-	//defer memf.Close()
+	memf, _ := os.Create("memprof")
+	pprof.WriteHeapProfile(memf)
+	defer memf.Close()
 }

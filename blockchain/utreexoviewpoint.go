@@ -7,6 +7,7 @@ package blockchain
 import (
 	"bytes"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 	"github.com/mit-dci/utreexo/accumulator"
@@ -191,6 +192,28 @@ func (uview *UtreexoViewpoint) compareRoots(compRoot []accumulator.Hash) bool {
 	}
 
 	return true
+}
+
+func (b *BlockChain) SetUtreexoViewpoint(rootHint *chaincfg.UtreexoRootHint) error {
+	if rootHint == nil {
+		// Create empty utreexoViewpoint
+		b.utreexoViewpoint = NewUtreexoViewpoint()
+
+		return nil
+	}
+	rootBytes, err := chaincfg.UtreexoRootHintToBytes(*rootHint)
+	if err != nil {
+		return err
+	}
+
+	uView := NewUtreexoViewpoint()
+	err = deserializeUtreexoView(uView, rootBytes)
+	if err != nil {
+		return err
+	}
+	b.utreexoViewpoint = uView
+
+	return nil
 }
 
 // NewUtreexoViewpoint returns an empty UtreexoViewpoint

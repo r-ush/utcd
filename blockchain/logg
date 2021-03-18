@@ -1,0 +1,96 @@
+2021-03-14 15:30:16.967 [INF] TST: Pre-alloacting for %v entries:  0
+PUT key:7574786f73657476657273696f6e   PUT value:02000000
+PUT key:7370656e646a6f75726e616c76657273696f6e   PUT value:01000000
+PUT key:0000000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f   PUT value:0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff7f200200000003
+PUT key:06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f   PUT value:00000000
+PUT key:00000000   PUT value:06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f
+PUT key:636861696e7374617465   PUT value:06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f0000000001000000000000000100000002
+PUT key:06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f   PUT value:000000000000000029010000
+PUT key:66666c64622d77726974656c6f63   PUT value:000000002901000021fd4dd5
+PUT key:66666c64622d77726974656c6f63   PUT value:000000002901000021fd4dd5
+2021-03-14 15:30:16.967 [TRC] TST: UTXO cache consistency status from disk: [0] hash <nil>
+2021-03-14 15:30:16.967 [DBG] TST: Database didn't specify UTXO state consistency: consistent to best chain tip (0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206)
+PUT key:7574786f7374617465636f6e73697374656e6379   PUT value:0106226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f
+PUT key:66666c64622d77726974656c6f63   PUT value:000000002901000021fd4dd5
+2021-03-14 15:30:16.967 [INF] TST: Chain state (height 0, hash 0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206, totaltx 1, work 2)
+HIIIIIIIIII
+spends outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+spends amount:50 BTC
+2021-03-14 15:30:16.967 [TRC] TST: Processing block 31c374fa138a3580528075b5e918febe62f1c08d04a5f7e02bc1c9f65bc8d006
+PUT key:06d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331   PUT value:00000000290100009c000000
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+PUT key:0000000106d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331   PUT value:0100000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f7be2fda2f21360ebdcc4dd2f354bbb9a34f66a44f720d3e6de1151e4b5cbe5bedbe5494dffff7f200100000001
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+CHECK CONNECT
+VIEW LOOP DONE
+UTXO NIL
+getEntries from seekAndCacheEntries outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+LEN CACHED 0
+seekAndCacheEntries outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+seekAndCacheEntries entry <nil>
+LEN CACHED 1
+utxoview addEntry outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+PUT key:0000000106d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331   PUT value:0100000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f7be2fda2f21360ebdcc4dd2f354bbb9a34f66a44f720d3e6de1151e4b5cbe5bedbe5494dffff7f200100000003
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+PUT key:636861696e7374617465   PUT value:06d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c3310100000002000000000000000100000004
+PUT key:06d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331   PUT value:01000000
+PUT key:01000000   PUT value:06d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331
+PUT key:06d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331   PUT value:
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+Commit outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+utxoCache commit outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+addEntry outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+2021-03-14 15:30:16.967 [INF] TST: Flushing UTXO cache of ~1 MiB to disk. For large sizes, this can take up to several minutes...
+PUT key:7574786f7374617465636f6e73697374656e6379   PUT value:0206226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+2021-03-14 15:30:16.967 [TRC] TST: Flushing 1 more entries...
+flush outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+add put outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+dbPutUtxoEntries outpoint:bee5cbb5e45111dee6d320f7446af6349abb4b352fddc4dceb6013f2a2fde27b:0
+PUT key:7be2fda2f21360ebdcc4dd2f354bbb9a34f66a44f720d3e6de1151e4b5cbe5be00   PUT value:0300320751
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+PUT key:7574786f7374617465636f6e73697374656e6379   PUT value:0106d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c331
+PUT key:66666c64622d77726974656c6f63   PUT value:00000000c5010000672d0876
+2021-03-14 15:30:16.967 [DBG] TST: Done flushing UTXO cache to disk
+2021-03-14 15:30:16.967 [DBG] TST: Accepted block 31c374fa138a3580528075b5e918febe62f1c08d04a5f7e02bc1c9f65bc8d006
+HIIIIIIIIII
+spends outpoint:e67bbb5d94241363070bf6550ffb1b980664d5c97e039f7cdb1734e6dc2ddd6a:0
+spends amount:50 BTC
+2021-03-14 15:30:16.967 [TRC] TST: Processing block 0002843b1374cf1075d7f76068a1cebe2edfb211d953f958f9d437ecf77f641c
+PUT key:1c647ff7ec37d4f958f953d911b2df2ebecea16860f7d77510cf74133b840200   PUT value:00000000c50100009c000000
+PUT key:66666c64622d77726974656c6f63   PUT value:000000006102000053018162
+PUT key:000000021c647ff7ec37d4f958f953d911b2df2ebecea16860f7d77510cf74133b840200   PUT value:0100000006d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c3316add2ddce63417db7c9f037ec9d56406981bfb0f55f60b07631324945dbb7be6dce5494dffff7f20ffffff7f01
+PUT key:66666c64622d77726974656c6f63   PUT value:000000006102000053018162
+CHECK CONNECT
+VIEW LOOP DONE
+UTXO NIL
+getEntries from seekAndCacheEntries outpoint:e67bbb5d94241363070bf6550ffb1b980664d5c97e039f7cdb1734e6dc2ddd6a:0
+LEN CACHED 0
+dbSeekUtxoEntry entry:0300320751
+dbSeekUtxoEntry op:&6add2ddce63417db7c9f037ec9d56406981bfb0f55f60b07631324945dbb7be600
+dbSeekUtxoEntry deser key:e67bbb5d94241363070bf6550ffb1b980664d5c97e039f7cdb1734e6dc2ddd6a:0
+seekAndCacheEntries outpoint:e67bbb5d94241363070bf6550ffb1b980664d5c97e039f7cdb1734e6dc2ddd6a:0
+seekAndCacheEntries entry &{5000000000 [81] 1 0 1}
+PUT key:000000021c647ff7ec37d4f958f953d911b2df2ebecea16860f7d77510cf74133b840200   PUT value:0100000006d0c85bf6c9c12be0f7a5048dc0f162befe18e9b575805280358a13fa74c3316add2ddce63417db7c9f037ec9d56406981bfb0f55f60b07631324945dbb7be6dce5494dffff7f20ffffff7f05
+PUT key:66666c64622d77726974656c6f63   PUT value:000000006102000053018162
+--- FAIL: TestUtxoCache_ThresholdPeriodicFlush (0.01s)
+panic: tried to overwrite transaction e67bbb5d94241363070bf6550ffb1b980664d5c97e039f7cdb1734e6dc2ddd6a at block height 1 that is not fully spent [recovered]
+	panic: tried to overwrite transaction e67bbb5d94241363070bf6550ffb1b980664d5c97e039f7cdb1734e6dc2ddd6a at block height 1 that is not fully spent
+
+goroutine 11 [running]:
+testing.tRunner.func1.1(0x6bcae0, 0xc0004fe6e0)
+	/nix/store/zymy4dammwvlw8v01h23iycx6v8sdp9m-go-1.15.7/share/go/src/testing/testing.go:1072 +0x30d
+testing.tRunner.func1(0xc000102c00)
+	/nix/store/zymy4dammwvlw8v01h23iycx6v8sdp9m-go-1.15.7/share/go/src/testing/testing.go:1075 +0x41a
+panic(0x6bcae0, 0xc0004fe6e0)
+	/nix/store/zymy4dammwvlw8v01h23iycx6v8sdp9m-go-1.15.7/share/go/src/runtime/panic.go:969 +0x1b9
+github.com/btcsuite/btcd/blockchain.addBlock(0xc0000d8240, 0xc000696140, 0x0, 0x0, 0x0, 0xc000696140, 0xc00068e030, 0x1, 0x1)
+	/home/calvin/bitcoin-projects/go/utreexo1/go/src/github.com/mit-dci/utcd/blockchain/utxocache_test.go:225 +0x1465
+github.com/btcsuite/btcd/blockchain.TestUtxoCache_ThresholdPeriodicFlush(0xc000102c00)
+	/home/calvin/bitcoin-projects/go/utreexo1/go/src/github.com/mit-dci/utcd/blockchain/utxocache_test.go:381 +0x147
+testing.tRunner(0xc000102c00, 0x82eee0)
+	/nix/store/zymy4dammwvlw8v01h23iycx6v8sdp9m-go-1.15.7/share/go/src/testing/testing.go:1123 +0xef
+created by testing.(*T).Run
+	/nix/store/zymy4dammwvlw8v01h23iycx6v8sdp9m-go-1.15.7/share/go/src/testing/testing.go:1168 +0x2b3
+exit status 2
+FAIL	github.com/btcsuite/btcd/blockchain	0.024s

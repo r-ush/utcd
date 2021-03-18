@@ -14,10 +14,11 @@ func (b *BlockChain) UtreexoRootBeingVerified() *chaincfg.UtreexoRootHint {
 	return b.utreexoRootToVerify
 }
 
-// UtreexoRootHints returns the underlying utreexo root to start verifying from
-func (b *BlockChain) UtreexoStartRoot() *chaincfg.UtreexoRootHint {
-	return b.utreexoStartRoot
-}
+//
+//// UtreexoRootHints returns the underlying utreexo root to start verifying from
+//func (b *BlockChain) UtreexoStartRoot() *chaincfg.UtreexoRootHint {
+//	return b.utreexoStartRoot
+//}
 
 // findNextUtreexoRootHint returns the next Utreexo root hint
 func (b *BlockChain) findNextUtreexoRootHint(height int32) *chaincfg.UtreexoRootHint {

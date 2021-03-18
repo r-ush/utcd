@@ -68,7 +68,7 @@ func (b *blockProgressLogger) LogBlockHeight(block *btcutil.Block, chain *blockc
 	if b.receivedLogTx == 1 {
 		txStr = "transaction"
 	}
-	if chain.UtreexoRootBeingVerified() != nil {
+	if chain.UtreexoRootBeingVerified() != nil || chain.UtreexoRootVerifyMode {
 		b.subsystemLogger.Infof("%s %d %s in the last %s (%d %s, height %d, %s)",
 			b.progressAction, b.receivedLogBlocks, blockStr, tDuration, b.receivedLogTx,
 			txStr, block.Height(), block.MsgBlock().Header.Timestamp)

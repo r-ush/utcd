@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/wire"
@@ -134,10 +135,10 @@ func (b *BlockChain) processOrphans(hash *chainhash.Hash, flags BehaviorFlags) e
 // header is deemed invalid
 // No headers are saved to disk as there is no need to keep a state of the
 // block index since we don't resume for utreexo root verify mode.
-func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders) error {
+func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders, utreexoStartRoot *chaincfg.UtreexoRootHint) error {
 	var err error
 	for _, header := range headers.Headers {
-		err = b.maybeAcceptHeader(header)
+		err = b.maybeAcceptHeader(header, utreexoStartRoot)
 		if err != nil {
 			return err
 		}

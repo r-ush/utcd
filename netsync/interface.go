@@ -36,7 +36,9 @@ type Config struct {
 
 	DisableCheckpoints bool
 	MaxPeers           int
-	UtreexoCSN         bool
+
+	UtreexoCSN            bool
+	UtreexoRootVerifyMode bool
 
 	FeeEstimator *mempool.FeeEstimator
 }

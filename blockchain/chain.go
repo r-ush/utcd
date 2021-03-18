@@ -147,6 +147,7 @@ type BlockChain struct {
 	utreexoRootHints         []chaincfg.UtreexoRootHint
 	utreexoRootHintsByHeight map[int32]*chaincfg.UtreexoRootHint
 	utreexoRootToVerify      *chaincfg.UtreexoRootHint
+	UtreexoRootVerifyMode    bool
 	utreexoStartRoot         *chaincfg.UtreexoRootHint
 
 	utreexoLookAhead int               // set a value for the ttl
@@ -2138,6 +2139,9 @@ type Config struct {
 	// UtreexoRootToVerify is the utreexo root hint being verified
 	UtreexoRootToVerify *chaincfg.UtreexoRootHint
 
+	// UtreexoRootVerifyMode if we're verifying utreexo root hints
+	UtreexoRootVerifyMode bool
+
 	// UtreexoRootHints are all the UtreexoRootHints included in this
 	// binary
 	UtreexoRootHints []chaincfg.UtreexoRootHint
@@ -2158,7 +2162,7 @@ type Config struct {
 // New returns a BlockChain instance using the provided configuration details.
 func New(config *Config) (*BlockChain, error) {
 	// Enforce required config fields.
-	if config.DB == nil && config.UtreexoRootToVerify == nil {
+	if config.DB == nil && config.UtreexoRootToVerify == nil && !config.UtreexoRootVerifyMode {
 		return nil, AssertError("blockchain.New database is nil")
 	}
 	if config.ChainParams == nil {
@@ -2188,7 +2192,7 @@ func New(config *Config) (*BlockChain, error) {
 
 	// Keep utxocache nil for UtreexoRootToVerify mode
 	var initedUtxoCache *utxoCache
-	if config.UtreexoRootToVerify == nil {
+	if config.UtreexoRootToVerify == nil && !config.UtreexoRootVerifyMode {
 		initedUtxoCache = newUtxoCache(config.DB, config.UtxoCacheMaxSize)
 	}
 
@@ -2197,39 +2201,40 @@ func New(config *Config) (*BlockChain, error) {
 	targetTimePerBlock := int64(params.TargetTimePerBlock / time.Second)
 	adjustmentFactor := params.RetargetAdjustmentFactor
 	b := BlockChain{
-		assumeValidHash:     config.AssumeValidHash,
-		checkpoints:         config.Checkpoints,
-		checkpointsByHeight: checkpointsByHeight,
-		db:                  config.DB,
-		chainParams:         params,
-		timeSource:          config.TimeSource,
-		sigCache:            config.SigCache,
-		indexManager:        config.IndexManager,
-		minRetargetTimespan: targetTimespan / adjustmentFactor,
-		maxRetargetTimespan: targetTimespan * adjustmentFactor,
-		blocksPerRetarget:   int32(targetTimespan / targetTimePerBlock),
-		index:               newBlockIndex(config.DB, params),
-		utxoCache:           initedUtxoCache,
-		hashCache:           config.HashCache,
-		bestChain:           newChainView(nil),
-		orphans:             make(map[chainhash.Hash]*orphanBlock),
-		prevOrphans:         make(map[chainhash.Hash][]*orphanBlock),
-		warningCaches:       newThresholdCaches(vbNumBits),
-		deploymentCaches:    newThresholdCaches(chaincfg.DefinedDeployments),
-		utreexo:             config.Utreexo,
-		utreexoCSN:          config.UtreexoCSN,
-		utreexoLookAhead:    config.UtreexoLookAhead,
-		dataDir:             config.DataDir,
+		assumeValidHash:       config.AssumeValidHash,
+		checkpoints:           config.Checkpoints,
+		checkpointsByHeight:   checkpointsByHeight,
+		db:                    config.DB,
+		chainParams:           params,
+		timeSource:            config.TimeSource,
+		sigCache:              config.SigCache,
+		indexManager:          config.IndexManager,
+		minRetargetTimespan:   targetTimespan / adjustmentFactor,
+		maxRetargetTimespan:   targetTimespan * adjustmentFactor,
+		blocksPerRetarget:     int32(targetTimespan / targetTimePerBlock),
+		index:                 newBlockIndex(config.DB, params),
+		utxoCache:             initedUtxoCache,
+		hashCache:             config.HashCache,
+		bestChain:             newChainView(nil),
+		orphans:               make(map[chainhash.Hash]*orphanBlock),
+		prevOrphans:           make(map[chainhash.Hash][]*orphanBlock),
+		warningCaches:         newThresholdCaches(vbNumBits),
+		deploymentCaches:      newThresholdCaches(chaincfg.DefinedDeployments),
+		utreexo:               config.Utreexo,
+		utreexoCSN:            config.UtreexoCSN,
+		utreexoLookAhead:      config.UtreexoLookAhead,
+		UtreexoRootVerifyMode: config.UtreexoRootVerifyMode,
+		dataDir:               config.DataDir,
 	}
 
 	// Set the utreexo CSN params
-	if config.UtreexoCSN {
+	if config.UtreexoCSN || config.UtreexoRootVerifyMode {
 		b.utreexoLookAhead = config.UtreexoLookAhead
 		b.utreexoCSN = config.UtreexoCSN
 
 		// If we're at the verify root and exit mode, set the
 		// necessary params
-		if config.UtreexoRootToVerify != nil {
+		if config.UtreexoRootToVerify != nil || config.UtreexoRootVerifyMode {
 			// Make map for Utreexo root hints
 			utreexoRootHintsByHeight := make(map[int32]*chaincfg.UtreexoRootHint)
 			var prevRootHintHeight int32

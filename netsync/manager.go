@@ -8,7 +8,6 @@ import (
 	"container/list"
 	"math/rand"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -193,7 +192,7 @@ func limitAdd(m map[chainhash.Hash]struct{}, hash chainhash.Hash, limit int) {
 
 // ValidateUtreexoRoot validates the given utreexo root
 func (sm *SyncManager) ValidateUtreexoRoot() error {
-	rootToVerify := sm.chain.UtreexoRootBeingVerified()
+	rootToVerify := sm.utreexoRootToVerify
 
 	// The block height that we wanna verify to
 	endHeight := rootToVerify.Height
@@ -762,251 +761,251 @@ func checkWork() bool {
 	return true
 }
 
-func (sm *SyncManager) distributeUBlocks(ubmsg *ublockMsg) {
-	peer := ubmsg.peer
-	state, exists := sm.peerStates[peer]
-	if !exists {
-		log.Warnf("Received ublock message from unknown peer %s", peer)
-		return
-	}
-
-	blockHash := ubmsg.ublock.Hash()
-	for _, worker := range sm.syncWorkers {
-		if _, exists = worker.requestedBlocks[*blockHash]; exists {
-			//worker.handleUBlockMsg(ubmsg.ublock)
-
-			// Remove block from request maps. Either chain will know about it and
-			// so we shouldn't have any more instances of trying to fetch it, or we
-			// will fail the insert and thus we'll retry next time we get an inv.
-			delete(state.requestedBlocks, *blockHash)
-			delete(sm.requestedBlocks, *blockHash)
-			break
-		}
-	}
-
-	// if we reach here, it means that the peer gave us a block we didn't ask for
-
-	log.Warnf("Got unrequested ublock %v from %s -- "+
-		"disconnecting", blockHash, peer.Addr())
-	peer.Disconnect()
-	return
-}
-
-func (sm *SyncManager) distributeInvs(imsg *invMsg) {
-	peer := imsg.peer
-	state, exists := sm.peerStates[peer]
-	if !exists {
-		log.Warnf("Received inv message from unknown peer %s", peer)
-		return
-	}
-
-	// Attempt to find the final block in the inventory list.  There may
-	// not be one.
-	lastBlock := -1
-	invVects := imsg.inv.InvList
-	for i := len(invVects) - 1; i >= 0; i-- {
-		if invVects[i].Type == wire.InvTypeBlock {
-			lastBlock = i
-			break
-		} else if invVects[i].Type == wire.InvTypeUBlock {
-			lastBlock = i
-			break
-		}
-	}
-
-	// If this inv contains a block announcement, and this isn't coming from
-	// our current sync peer or we're current, then update the last
-	// announced block for this peer. We'll use this information later to
-	// update the heights of peers based on blocks we've accepted that they
-	// previously announced.
-	if lastBlock != -1 && (peer != sm.syncPeer || sm.current()) {
-		peer.UpdateLastAnnouncedBlock(&invVects[lastBlock].Hash)
-	}
-
-	// Ignore invs from peers that aren't the sync if we are not current.
-	// Helps prevent fetching a mass of orphans.
-	if peer != sm.syncPeer && !sm.current() {
-		return
-	}
-
-	// If our chain is current and a peer announces a block we already
-	// know of, then update their current block height.
-	if lastBlock != -1 && sm.current() {
-		blkHeight, err := sm.chain.BlockHeightByHash(&invVects[lastBlock].Hash)
-		if err == nil {
-			peer.UpdateLastBlockHeight(blkHeight)
-		}
-	}
-
-	// Request the advertised inventory if we don't already have it.  Also,
-	// request parent blocks of orphans if we receive one we already have.
-	// Finally, attempt to detect potential stalls due to long side chains
-	// we already have and request more blocks to prevent them.
-	for i, iv := range invVects {
-		// Ignore unsupported inventory types.
-		switch iv.Type {
-		case wire.InvTypeBlock:
-		case wire.InvTypeUBlock:
-		case wire.InvTypeTx:
-		case wire.InvTypeWitnessBlock:
-		case wire.InvTypeWitnessUBlock:
-		case wire.InvTypeWitnessTx:
-		default:
-			continue
-		}
-
-		// Add the inventory to the cache of known inventory
-		// for the peer.
-		peer.AddKnownInventory(iv)
-
-		// Ignore inventory when we're in headers-first mode.
-		if sm.headersFirstMode {
-			continue
-		}
-
-		// Request the inventory if we don't already have it.
-		haveInv, err := sm.haveInventory(iv)
-		if err != nil {
-			log.Warnf("Unexpected failure when checking for "+
-				"existing inventory during inv message "+
-				"processing: %v", err)
-			continue
-		}
-		if !haveInv {
-			if iv.Type == wire.InvTypeTx {
-				// Skip the transaction if it has already been
-				// rejected.
-				if _, exists := sm.rejectedTxns[iv.Hash]; exists {
-					continue
-				}
-			}
-
-			// Ignore invs block invs from non-witness enabled
-			// peers, as after segwit activation we only want to
-			// download from peers that can provide us full witness
-			// data for blocks.
-			if !peer.IsWitnessEnabled() && iv.Type == wire.InvTypeBlock {
-				continue
-			}
-
-			// Add it to the request queue.
-			state.requestQueue = append(state.requestQueue, iv)
-			continue
-		}
-
-		if iv.Type == wire.InvTypeUBlock {
-			// The block is an orphan block that we already have.
-			// When the existing orphan was processed, it requested
-			// the missing parent blocks.  When this scenario
-			// happens, it means there were more blocks missing
-			// than are allowed into a single inventory message.  As
-			// a result, once this peer requested the final
-			// advertised block, the remote peer noticed and is now
-			// resending the orphan block as an available block
-			// to signal there are more missing blocks that need to
-			// be requested.
-			if sm.chain.IsKnownOrphan(&iv.Hash, true) {
-				// Request blocks starting at the latest known
-				// up to the root of the orphan that just came
-				// in.
-				orphanRoot := sm.chain.GetOrphanRoot(&iv.Hash, true)
-				locator, err := sm.chain.LatestBlockLocator()
-				if err != nil {
-					log.Errorf("PEER: Failed to get block "+
-						"locator for the latest block: "+
-						"%v", err)
-					continue
-				}
-				peer.PushGetUBlocksMsg(locator, orphanRoot)
-				continue
-			}
-
-			// We already have the final block advertised by this
-			// inventory message, so force a request for more.  This
-			// should only happen if we're on a really long side
-			// chain.
-			if i == lastBlock {
-				// Request blocks after this one up to the
-				// final one the remote peer knows about (zero
-				// stop hash).
-				locator := sm.chain.BlockLocatorFromHash(&iv.Hash)
-				peer.PushGetUBlocksMsg(locator, &zeroHash)
-			}
-		}
-	}
-
-}
-
-// parallelSyncHandler is the main handler for parallel sync.  It must be run as a
-// goroutine.
-func (sm *SyncManager) parallelSyncHandler() {
-	stallTicker := time.NewTicker(stallSampleInterval)
-	defer stallTicker.Stop()
-
-out:
-	for {
-		select {
-		case m := <-sm.msgChan:
-			switch msg := m.(type) {
-			case *newPeerMsg:
-				sm.handleNewPeerMsg(msg.peer)
-
-			case *txMsg:
-				log.Debugf("Ignoring message: %T", msg)
-				msg.reply <- struct{}{}
-
-			case *blockMsg:
-				log.Debugf("Ignoring message: %T", msg)
-				msg.reply <- struct{}{}
-
-			case *ublockMsg:
-				sm.handleUBlockMsg(msg)
-				msg.reply <- struct{}{}
-
-			case *invMsg:
-				sm.handleInvMsg(msg)
-
-			case *headersMsg:
-				sm.handleHeadersMsg(msg)
-
-			case *notFoundMsg:
-				sm.handleNotFoundMsg(msg)
-
-			case *donePeerMsg:
-				sm.handleDonePeerMsg(msg.peer)
-
-			case getSyncPeerMsg:
-				log.Debugf("Ignoring message: %T", msg)
-
-			case processBlockMsg:
-				log.Debugf("Ignoring message: %T", msg)
-
-			case processUBlockMsg:
-				log.Debugf("Ignoring message: %T", msg)
-
-			case isCurrentMsg:
-				msg.reply <- sm.current()
-
-			case pauseMsg:
-				// Wait until the sender unpauses the manager.
-				<-msg.unpause
-
-			default:
-				log.Warnf("Invalid message type in block "+
-					"handler: %T", msg)
-			}
-
-		case <-stallTicker.C:
-			sm.handleStallSample()
-
-		case <-sm.quit:
-			break out
-		}
-	}
-
-	sm.wg.Done()
-	log.Trace("parallel sync handler done")
-}
+//func (sm *SyncManager) distributeUBlocks(ubmsg *ublockMsg) {
+//	peer := ubmsg.peer
+//	state, exists := sm.peerStates[peer]
+//	if !exists {
+//		log.Warnf("Received ublock message from unknown peer %s", peer)
+//		return
+//	}
+//
+//	blockHash := ubmsg.ublock.Hash()
+//	for _, worker := range sm.syncWorkers {
+//		if _, exists = worker.requestedBlocks[*blockHash]; exists {
+//			//worker.handleUBlockMsg(ubmsg.ublock)
+//
+//			// Remove block from request maps. Either chain will know about it and
+//			// so we shouldn't have any more instances of trying to fetch it, or we
+//			// will fail the insert and thus we'll retry next time we get an inv.
+//			delete(state.requestedBlocks, *blockHash)
+//			delete(sm.requestedBlocks, *blockHash)
+//			break
+//		}
+//	}
+//
+//	// if we reach here, it means that the peer gave us a block we didn't ask for
+//
+//	log.Warnf("Got unrequested ublock %v from %s -- "+
+//		"disconnecting", blockHash, peer.Addr())
+//	peer.Disconnect()
+//	return
+//}
+//
+//func (sm *SyncManager) distributeInvs(imsg *invMsg) {
+//	peer := imsg.peer
+//	state, exists := sm.peerStates[peer]
+//	if !exists {
+//		log.Warnf("Received inv message from unknown peer %s", peer)
+//		return
+//	}
+//
+//	// Attempt to find the final block in the inventory list.  There may
+//	// not be one.
+//	lastBlock := -1
+//	invVects := imsg.inv.InvList
+//	for i := len(invVects) - 1; i >= 0; i-- {
+//		if invVects[i].Type == wire.InvTypeBlock {
+//			lastBlock = i
+//			break
+//		} else if invVects[i].Type == wire.InvTypeUBlock {
+//			lastBlock = i
+//			break
+//		}
+//	}
+//
+//	// If this inv contains a block announcement, and this isn't coming from
+//	// our current sync peer or we're current, then update the last
+//	// announced block for this peer. We'll use this information later to
+//	// update the heights of peers based on blocks we've accepted that they
+//	// previously announced.
+//	if lastBlock != -1 && (peer != sm.syncPeer || sm.current()) {
+//		peer.UpdateLastAnnouncedBlock(&invVects[lastBlock].Hash)
+//	}
+//
+//	// Ignore invs from peers that aren't the sync if we are not current.
+//	// Helps prevent fetching a mass of orphans.
+//	if peer != sm.syncPeer && !sm.current() {
+//		return
+//	}
+//
+//	// If our chain is current and a peer announces a block we already
+//	// know of, then update their current block height.
+//	if lastBlock != -1 && sm.current() {
+//		blkHeight, err := sm.chain.BlockHeightByHash(&invVects[lastBlock].Hash)
+//		if err == nil {
+//			peer.UpdateLastBlockHeight(blkHeight)
+//		}
+//	}
+//
+//	// Request the advertised inventory if we don't already have it.  Also,
+//	// request parent blocks of orphans if we receive one we already have.
+//	// Finally, attempt to detect potential stalls due to long side chains
+//	// we already have and request more blocks to prevent them.
+//	for i, iv := range invVects {
+//		// Ignore unsupported inventory types.
+//		switch iv.Type {
+//		case wire.InvTypeBlock:
+//		case wire.InvTypeUBlock:
+//		case wire.InvTypeTx:
+//		case wire.InvTypeWitnessBlock:
+//		case wire.InvTypeWitnessUBlock:
+//		case wire.InvTypeWitnessTx:
+//		default:
+//			continue
+//		}
+//
+//		// Add the inventory to the cache of known inventory
+//		// for the peer.
+//		peer.AddKnownInventory(iv)
+//
+//		// Ignore inventory when we're in headers-first mode.
+//		if sm.headersFirstMode {
+//			continue
+//		}
+//
+//		// Request the inventory if we don't already have it.
+//		haveInv, err := sm.haveInventory(iv)
+//		if err != nil {
+//			log.Warnf("Unexpected failure when checking for "+
+//				"existing inventory during inv message "+
+//				"processing: %v", err)
+//			continue
+//		}
+//		if !haveInv {
+//			if iv.Type == wire.InvTypeTx {
+//				// Skip the transaction if it has already been
+//				// rejected.
+//				if _, exists := sm.rejectedTxns[iv.Hash]; exists {
+//					continue
+//				}
+//			}
+//
+//			// Ignore invs block invs from non-witness enabled
+//			// peers, as after segwit activation we only want to
+//			// download from peers that can provide us full witness
+//			// data for blocks.
+//			if !peer.IsWitnessEnabled() && iv.Type == wire.InvTypeBlock {
+//				continue
+//			}
+//
+//			// Add it to the request queue.
+//			state.requestQueue = append(state.requestQueue, iv)
+//			continue
+//		}
+//
+//		if iv.Type == wire.InvTypeUBlock {
+//			// The block is an orphan block that we already have.
+//			// When the existing orphan was processed, it requested
+//			// the missing parent blocks.  When this scenario
+//			// happens, it means there were more blocks missing
+//			// than are allowed into a single inventory message.  As
+//			// a result, once this peer requested the final
+//			// advertised block, the remote peer noticed and is now
+//			// resending the orphan block as an available block
+//			// to signal there are more missing blocks that need to
+//			// be requested.
+//			if sm.chain.IsKnownOrphan(&iv.Hash, true) {
+//				// Request blocks starting at the latest known
+//				// up to the root of the orphan that just came
+//				// in.
+//				orphanRoot := sm.chain.GetOrphanRoot(&iv.Hash, true)
+//				locator, err := sm.chain.LatestBlockLocator()
+//				if err != nil {
+//					log.Errorf("PEER: Failed to get block "+
+//						"locator for the latest block: "+
+//						"%v", err)
+//					continue
+//				}
+//				peer.PushGetUBlocksMsg(locator, orphanRoot)
+//				continue
+//			}
+//
+//			// We already have the final block advertised by this
+//			// inventory message, so force a request for more.  This
+//			// should only happen if we're on a really long side
+//			// chain.
+//			if i == lastBlock {
+//				// Request blocks after this one up to the
+//				// final one the remote peer knows about (zero
+//				// stop hash).
+//				locator := sm.chain.BlockLocatorFromHash(&iv.Hash)
+//				peer.PushGetUBlocksMsg(locator, &zeroHash)
+//			}
+//		}
+//	}
+//
+//}
+//
+//// parallelSyncHandler is the main handler for parallel sync.  It must be run as a
+//// goroutine.
+//func (sm *SyncManager) parallelSyncHandler() {
+//	stallTicker := time.NewTicker(stallSampleInterval)
+//	defer stallTicker.Stop()
+//
+//out:
+//	for {
+//		select {
+//		case m := <-sm.msgChan:
+//			switch msg := m.(type) {
+//			case *newPeerMsg:
+//				sm.handleNewPeerMsg(msg.peer)
+//
+//			case *txMsg:
+//				log.Debugf("Ignoring message: %T", msg)
+//				msg.reply <- struct{}{}
+//
+//			case *blockMsg:
+//				log.Debugf("Ignoring message: %T", msg)
+//				msg.reply <- struct{}{}
+//
+//			case *ublockMsg:
+//				sm.handleUBlockMsg(msg)
+//				msg.reply <- struct{}{}
+//
+//			case *invMsg:
+//				sm.handleInvMsg(msg)
+//
+//			case *headersMsg:
+//				sm.handleHeadersMsg(msg)
+//
+//			case *notFoundMsg:
+//				sm.handleNotFoundMsg(msg)
+//
+//			case *donePeerMsg:
+//				sm.handleDonePeerMsg(msg.peer)
+//
+//			case getSyncPeerMsg:
+//				log.Debugf("Ignoring message: %T", msg)
+//
+//			case processBlockMsg:
+//				log.Debugf("Ignoring message: %T", msg)
+//
+//			case processUBlockMsg:
+//				log.Debugf("Ignoring message: %T", msg)
+//
+//			case isCurrentMsg:
+//				msg.reply <- sm.current()
+//
+//			case pauseMsg:
+//				// Wait until the sender unpauses the manager.
+//				<-msg.unpause
+//
+//			default:
+//				log.Warnf("Invalid message type in block "+
+//					"handler: %T", msg)
+//			}
+//
+//		case <-stallTicker.C:
+//			sm.handleStallSample()
+//
+//		case <-sm.quit:
+//			break out
+//		}
+//	}
+//
+//	sm.wg.Done()
+//	log.Trace("parallel sync handler done")
+//}
 
 // SyncManager is used to communicate block related messages with peers. The
 // SyncManager is started as by executing Start() in a goroutine. Once started,
@@ -1041,12 +1040,11 @@ type SyncManager struct {
 
 	utreexoCSN            bool
 	utreexoRootVerifyMode bool
+	utreexoRootToVerify   *chaincfg.UtreexoRootHint
+	utreexoStartRoot      *chaincfg.UtreexoRootHint
 
 	// An optional fee estimator.
 	feeEstimator *mempool.FeeEstimator
-
-	syncWorkers    []*syncWorker
-	numSyncWorkers int32
 }
 
 // resetHeaderState sets the headers-first mode state to values appropriate for
@@ -1105,7 +1103,7 @@ func (sm *SyncManager) startSync() {
 
 	// If we are verifying a utreexo root range, then call ValidateUtreexoRoot()
 	// and return. We keep a separate process for the root range verify
-	if sm.chain.UtreexoRootBeingVerified() != nil {
+	if sm.utreexoRootVerifyMode {
 		sm.ValidateUtreexoRoot()
 		return
 	}
@@ -1748,98 +1746,6 @@ func (sm *SyncManager) handleUBlockMsg(ubmsg *ublockMsg) {
 		}
 	}
 
-	// We have a separate process for utreexoRootVerify mode
-	if sm.utreexoRootVerifyMode {
-		behaviorFlags := blockchain.BFNone
-		//behaviorFlags |= blockchain.BFFastAdd
-
-		// Remove block from request maps. Either chain will know about it and
-		// so we shouldn't have any more instances of trying to fetch it, or we
-		// will fail the insert and thus we'll retry next time we get an inv.
-		delete(state.requestedBlocks, *blockHash)
-		delete(sm.requestedBlocks, *blockHash)
-
-		// Process the block to include validation, best chain selection, orphan
-		// handling, etc.
-		// It's always the main chain because we do the headers sync first
-
-		_, _, err := sm.chain.ProcessHeaderUBlock(ubmsg.ublock, behaviorFlags)
-		if err != nil {
-			// just panic. It's fine to restart the range verification.
-			panic(err)
-		}
-
-		rootToVerify := sm.chain.UtreexoRootBeingVerified()
-		if ubmsg.ublock.Height() == rootToVerify.Height {
-			if sm.chain.CompareRoots(rootToVerify.Roots) {
-				log.Infof("Utreexo root verified at height %v",
-					ubmsg.ublock.Height())
-				pid := os.Getpid()
-				p, _ := os.FindProcess(pid)
-				p.Signal(os.Interrupt)
-				//os.Exit(0)
-			} else {
-				log.Warnf("Utreexo root invalid at height %v",
-					ubmsg.ublock.Height())
-				pid := os.Getpid()
-				p, _ := os.FindProcess(pid)
-				p.Signal(os.Interrupt)
-				//os.Exit(1)
-			}
-		}
-
-		// Meta-data about the new block this peer is reporting. We use this
-		// below to update this peer's latest block height and the heights of
-		// other peers based on their last announced block hash. This allows us
-		// to dynamically update the block heights of peers, avoiding stale
-		// heights when looking for a new sync peer. Upon acceptance of a block
-		// or recognition of an orphan, we also use this information to update
-		// the block heights over other peers who's invs may have been ignored
-		// if we are actively syncing while the chain is not yet current or
-		// who may have lost the lock announcement race.
-		var heightUpdate int32
-		var blkHashUpdate *chainhash.Hash
-
-		if peer == sm.syncPeer {
-			sm.lastProgressTime = time.Now()
-		}
-
-		// Something for compatibility with the existing LogBlockHeight method
-		block := ubmsg.ublock.Block()
-
-		// When the block is not an orphan, log information about it and
-		// update the chain state.
-		sm.progressLogger.LogBlockHeight(block, sm.chain)
-
-		// Update this peer's latest block height, for future
-		// potential sync node candidacy.
-		best := sm.chain.BestSnapshot()
-		heightUpdate = best.Height
-		blkHashUpdate = &best.Hash
-
-		// Clear the rejected transactions.
-		sm.rejectedTxns = make(map[chainhash.Hash]struct{})
-
-		// Update the block height for this peer. But only send a message to
-		// the server for updating peer heights if this is an orphan or our
-		// chain is "current". This avoids sending a spammy amount of messages
-		// if we're syncing the chain from scratch.
-		if blkHashUpdate != nil && heightUpdate != 0 {
-			peer.UpdateLastBlockHeight(heightUpdate)
-			if sm.current() {
-				go sm.peerNotifier.UpdatePeerHeights(blkHashUpdate, heightUpdate,
-					peer)
-			}
-		}
-
-		if sm.startHeader != nil &&
-			len(state.requestedBlocks) < minInFlightBlocks {
-			sm.fetchHeaderVerifyUBlocks()
-		}
-
-		return
-	}
-
 	// When in headers-first mode, if the block matches the hash of the
 	// first header in the list of headers that are being fetched, it's
 	// eligible for less validation since the headers have already been
@@ -2127,8 +2033,8 @@ func (sm *SyncManager) fetchHeaderVerifyUBlocks() {
 		// If we have a root that we're doing the verify from, then
 		// skip all the blocks that are less than the height for the
 		// root.
-		if sm.chain.UtreexoStartRoot() != nil {
-			if node.height <= sm.chain.UtreexoStartRoot().Height {
+		if sm.utreexoStartRoot != nil {
+			if node.height <= sm.utreexoStartRoot.Height {
 				continue
 			}
 		}
@@ -2231,7 +2137,7 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 	}
 
 	if sm.utreexoRootVerifyMode {
-		err := sm.chain.ProcessHeaders(hmsg.headers)
+		err := sm.chain.ProcessHeaders(hmsg.headers, sm.utreexoStartRoot)
 		if err != nil {
 			log.Warnf("Got invalid headers from %s -- "+
 				"disconnecting", peer.Addr())
@@ -2271,7 +2177,7 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 				return
 			}
 
-			if node.height == sm.chain.UtreexoRootBeingVerified().Height {
+			if node.height == sm.utreexoRootToVerify.Height {
 				receivedAllHeaders = true
 				log.Infof("Downloaded all headers "+
 					"to root being verified at height "+
@@ -2896,13 +2802,188 @@ out:
 		}
 	}
 
-	log.Debug("Block handler shutting down: flushing blockchain caches...")
-	if err := sm.chain.FlushCachedState(blockchain.FlushRequired); err != nil {
-		log.Errorf("Error while flushing blockchain caches: %v", err)
+	if !sm.utreexoRootVerifyMode {
+		log.Debug("Block handler shutting down: flushing blockchain caches...")
+		if err := sm.chain.FlushCachedState(blockchain.FlushRequired); err != nil {
+			log.Errorf("Error while flushing blockchain caches: %v", err)
+		}
 	}
 
 	sm.wg.Done()
 	log.Trace("Block handler done")
+}
+
+func (sm *SyncManager) uRootHintVerifyHandler(verified chan bool) {
+	stallTicker := time.NewTicker(stallSampleInterval)
+	defer stallTicker.Stop()
+out:
+	for {
+		select {
+		case m := <-sm.msgChan:
+			switch msg := m.(type) {
+			case *newPeerMsg:
+				sm.handleNewPeerMsg(msg.peer)
+
+			case *ublockMsg:
+				done, verification := sm.uRootHandleUBlockMsg(msg)
+				msg.reply <- struct{}{}
+				if done {
+					verified <- verification
+					break out
+				}
+
+			case *invMsg:
+				sm.handleInvMsg(msg)
+
+			case *headersMsg:
+				sm.handleHeadersMsg(msg)
+
+			case *notFoundMsg:
+				sm.handleNotFoundMsg(msg)
+
+			case *donePeerMsg:
+				sm.handleDonePeerMsg(msg.peer)
+
+			case getSyncPeerMsg:
+				var peerID int32
+				if sm.syncPeer != nil {
+					peerID = sm.syncPeer.ID()
+				}
+				msg.reply <- peerID
+
+			case isCurrentMsg:
+				msg.reply <- sm.current()
+
+			case pauseMsg:
+				// Wait until the sender unpauses the manager.
+				<-msg.unpause
+
+			default:
+				log.Warnf("Invalid message type in block "+
+					"handler: %T", msg)
+			}
+
+		case <-stallTicker.C:
+			sm.handleStallSample()
+
+		case <-sm.quit:
+			break out
+		}
+	}
+
+	sm.wg.Done()
+	log.Trace("uRootHintVerifyHandler done")
+}
+
+// TODO kcalvinalvin: It's really mostly the same procedure with a regular block
+// This isn't the prettiest way
+func (sm *SyncManager) uRootHandleUBlockMsg(ubmsg *ublockMsg) (done bool, verified bool) {
+	peer := ubmsg.peer
+	state, exists := sm.peerStates[peer]
+	if !exists {
+		log.Warnf("Received ublock message from unknown peer %s", peer)
+		return
+	}
+
+	// If we didn't ask for this block then the peer is misbehaving.
+	blockHash := ubmsg.ublock.Hash()
+	if _, exists = state.requestedBlocks[*blockHash]; !exists {
+		// The regression test intentionally sends some blocks twice
+		// to test duplicate block insertion fails.  Don't disconnect
+		// the peer or ignore the block when we're in regression test
+		// mode in this case so the chain code is actually fed the
+		// duplicate blocks.
+		if sm.chainParams != &chaincfg.RegressionNetParams {
+			log.Warnf("Got unrequested ublock %v from %s -- "+
+				"disconnecting", blockHash, peer.Addr())
+			peer.Disconnect()
+			return
+		}
+	}
+
+	behaviorFlags := blockchain.BFNone
+	//behaviorFlags |= blockchain.BFFastAdd
+
+	// Remove block from request maps. Either chain will know about it and
+	// so we shouldn't have any more instances of trying to fetch it, or we
+	// will fail the insert and thus we'll retry next time we get an inv.
+	delete(state.requestedBlocks, *blockHash)
+	delete(sm.requestedBlocks, *blockHash)
+
+	// Process the block to include validation, best chain selection, orphan
+	// handling, etc.
+	// It's always the main chain because we do the headers sync first
+
+	_, _, err := sm.chain.ProcessHeaderUBlock(ubmsg.ublock, behaviorFlags)
+	if err != nil {
+		// just panic. It's fine to restart the range verification.
+		panic(err)
+	}
+
+	rootToVerify := sm.utreexoRootToVerify
+	if ubmsg.ublock.Height() == rootToVerify.Height {
+		if sm.chain.CompareRoots(rootToVerify.Roots) {
+			log.Infof("Utreexo root verified at height %v",
+				ubmsg.ublock.Height())
+			return true, true
+		} else {
+			log.Warnf("Utreexo root invalid at height %v",
+				ubmsg.ublock.Height())
+			return true, false
+		}
+	}
+
+	// Meta-data about the new block this peer is reporting. We use this
+	// below to update this peer's latest block height and the heights of
+	// other peers based on their last announced block hash. This allows us
+	// to dynamically update the block heights of peers, avoiding stale
+	// heights when looking for a new sync peer. Upon acceptance of a block
+	// or recognition of an orphan, we also use this information to update
+	// the block heights over other peers who's invs may have been ignored
+	// if we are actively syncing while the chain is not yet current or
+	// who may have lost the lock announcement race.
+	var heightUpdate int32
+	var blkHashUpdate *chainhash.Hash
+
+	if peer == sm.syncPeer {
+		sm.lastProgressTime = time.Now()
+	}
+
+	// Something for compatibility with the existing LogBlockHeight method
+	block := ubmsg.ublock.Block()
+
+	// When the block is not an orphan, log information about it and
+	// update the chain state.
+	sm.progressLogger.LogBlockHeight(block, sm.chain)
+
+	// Update this peer's latest block height, for future
+	// potential sync node candidacy.
+	best := sm.chain.BestSnapshot()
+	heightUpdate = best.Height
+	blkHashUpdate = &best.Hash
+
+	// Clear the rejected transactions.
+	sm.rejectedTxns = make(map[chainhash.Hash]struct{})
+
+	// Update the block height for this peer. But only send a message to
+	// the server for updating peer heights if this is an orphan or our
+	// chain is "current". This avoids sending a spammy amount of messages
+	// if we're syncing the chain from scratch.
+	if blkHashUpdate != nil && heightUpdate != 0 {
+		peer.UpdateLastBlockHeight(heightUpdate)
+		if sm.current() {
+			go sm.peerNotifier.UpdatePeerHeights(blkHashUpdate, heightUpdate,
+				peer)
+		}
+	}
+
+	if sm.startHeader != nil &&
+		len(state.requestedBlocks) < minInFlightBlocks {
+		sm.fetchHeaderVerifyUBlocks()
+	}
+
+	// If we reached here, we have neither finished or verified the block
+	return false, false
 }
 
 // handleBlockchainNotification handles notifications from blockchain.  It does
@@ -3110,6 +3191,36 @@ func (sm *SyncManager) Start() {
 	go sm.blockHandler()
 }
 
+// StartUtreexoRootHintVerify begins the core block handler which processes block and inv messages.
+func (sm *SyncManager) StartUtreexoRootHintVerify(rootHint *chaincfg.UtreexoRootHint, verifiedChan chan bool) {
+	// Already started?
+	if atomic.AddInt32(&sm.started, 1) != 1 {
+		return
+	}
+
+	if rootHint == nil {
+		log.Errorf("Given rootHint to verify is nil")
+		return
+	}
+	sm.utreexoRootToVerify = rootHint
+	sm.utreexoStartRoot = chaincfg.FindPreviousUtreexoRootHint(
+		sm.utreexoRootToVerify.Height, sm.chain.UtreexoRootHints())
+
+	sm.chain.SetUtreexoViewpoint(sm.utreexoStartRoot)
+
+	if sm.utreexoStartRoot == nil {
+		log.Infof("Verifying from height %v to height %v",
+			0, sm.utreexoRootToVerify.Height)
+	} else {
+		log.Infof("Verifying from height %v to height %v",
+			sm.utreexoStartRoot.Height, sm.utreexoRootToVerify.Height)
+	}
+
+	log.Trace("Starting UtreexoRootHint verify")
+	sm.wg.Add(1)
+	go sm.uRootHintVerifyHandler(verifiedChan)
+}
+
 // Stop gracefully shuts down the sync manager by stopping all asynchronous
 // handlers and waiting for them to finish.
 func (sm *SyncManager) Stop() error {
@@ -3163,20 +3274,21 @@ func (sm *SyncManager) Pause() chan<- struct{} {
 // block, tx, and inv updates.
 func New(config *Config) (*SyncManager, error) {
 	sm := SyncManager{
-		peerNotifier:    config.PeerNotifier,
-		chain:           config.Chain,
-		txMemPool:       config.TxMemPool,
-		chainParams:     config.ChainParams,
-		rejectedTxns:    make(map[chainhash.Hash]struct{}),
-		requestedTxns:   make(map[chainhash.Hash]struct{}),
-		requestedBlocks: make(map[chainhash.Hash]struct{}),
-		peerStates:      make(map[*peerpkg.Peer]*peerSyncState),
-		progressLogger:  newBlockProgressLogger("Processed", log),
-		msgChan:         make(chan interface{}, config.MaxPeers*3),
-		headerList:      list.New(),
-		quit:            make(chan struct{}),
-		feeEstimator:    config.FeeEstimator,
-		utreexoCSN:      config.UtreexoCSN,
+		peerNotifier:          config.PeerNotifier,
+		chain:                 config.Chain,
+		txMemPool:             config.TxMemPool,
+		chainParams:           config.ChainParams,
+		rejectedTxns:          make(map[chainhash.Hash]struct{}),
+		requestedTxns:         make(map[chainhash.Hash]struct{}),
+		requestedBlocks:       make(map[chainhash.Hash]struct{}),
+		peerStates:            make(map[*peerpkg.Peer]*peerSyncState),
+		progressLogger:        newBlockProgressLogger("Processed", log),
+		msgChan:               make(chan interface{}, config.MaxPeers*3),
+		headerList:            list.New(),
+		quit:                  make(chan struct{}),
+		feeEstimator:          config.FeeEstimator,
+		utreexoCSN:            config.UtreexoCSN,
+		utreexoRootVerifyMode: config.UtreexoRootVerifyMode,
 	}
 
 	best := sm.chain.BestSnapshot()
@@ -3188,7 +3300,7 @@ func New(config *Config) (*SyncManager, error) {
 		}
 	} else {
 		log.Info("Checkpoints are disabled")
-		if sm.chain.UtreexoRootBeingVerified() != nil {
+		if sm.utreexoRootVerifyMode {
 			// Push back the genesis header to the headerList
 			best := sm.chain.BestSnapshot()
 			node := headerNode{height: best.Height, hash: &best.Hash}
