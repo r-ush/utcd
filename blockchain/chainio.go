@@ -1403,9 +1403,6 @@ func (b *BlockChain) initChainState() error {
 		b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
 			numTxns, time.Unix(node.timestamp, 0))
 
-		// Create empty utreexoViewpoint
-		//b.utreexoViewpoint = NewUtreexoViewpoint()
-
 		b.memBlock = &memBlockStore{}
 		b.memBestState = &memBestState{}
 
@@ -1438,7 +1435,6 @@ func (b *BlockChain) initChainState() error {
 			// Create empty utreexoViewpoint
 			b.utreexoViewpoint = NewUtreexoViewpoint()
 		} else {
-			b.utreexoStartRoot = prevUtreexoRoot
 			rootBytes, err := chaincfg.UtreexoRootHintToBytes(*prevUtreexoRoot)
 			if err != nil {
 				return err

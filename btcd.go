@@ -35,7 +35,7 @@ var (
 // as a service and reacts accordingly.
 var winServiceMain func() (bool, error)
 
-func rootWorkerMain(interrupt <-chan struct{}) error {
+func rootMainNodeStart(interrupt <-chan struct{}) error {
 	// Enable http profiling server if requested.
 	if cfg.Profile != "" {
 		go func() {
@@ -61,7 +61,8 @@ func rootWorkerMain(interrupt <-chan struct{}) error {
 		defer pprof.StopCPUProfile()
 	}
 
-	mainNode, err := initMainNode(activeNetParams.Params, int32(runtime.NumCPU()*2))
+	//mainNode, err := initMainNode(activeNetParams.Params, int32(runtime.NumCPU()*2))
+	mainNode, err := initMainNode(activeNetParams.Params, 0)
 	if err != nil {
 		fmt.Println(err)
 		return err
@@ -77,6 +78,45 @@ func rootWorkerMain(interrupt <-chan struct{}) error {
 
 	<-interrupt
 
+	fmt.Println("RETURN rootMainNodeStart")
+
+	return nil
+}
+
+func rootWorkerStart(interrupt <-chan struct{}) error {
+	// Enable http profiling server if requested.
+	if cfg.Profile != "" {
+		go func() {
+			listenAddr := net.JoinHostPort("", cfg.Profile)
+			btcdLog.Infof("Profile server listening on %s", listenAddr)
+			profileRedirect := http.RedirectHandler("/debug/pprof",
+				http.StatusSeeOther)
+			http.Handle("/", profileRedirect)
+			btcdLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
+		}()
+	}
+
+	// Write cpu profile if requested.
+	if cfg.CPUProfile != "" {
+		f, err := os.Create(cfg.CPUProfile)
+		if err != nil {
+			fmt.Println(err)
+			btcdLog.Errorf("Unable to create cpu profile: %v", err)
+			return err
+		}
+		pprof.StartCPUProfile(f)
+		defer f.Close()
+		defer pprof.StopCPUProfile()
+	}
+
+	for i := int8(0); i < int8(runtime.NumCPU()); i++ {
+		workerNode := NewRemoteWorker(i)
+		workerNode.Start()
+	}
+
+	<-interrupt
+
+	fmt.Println("RETURN rootWorkerStart")
 	return nil
 }
 
@@ -108,8 +148,12 @@ func btcdMain(serverChan chan<- *server) error {
 	// Show version at startup.
 	btcdLog.Infof("Version %s", version())
 
+	if cfg.UtreexoMainNode {
+		return rootMainNodeStart(interrupt)
+	}
+
 	if cfg.UtreexoWorker {
-		return rootWorkerMain(interrupt)
+		return rootWorkerStart(interrupt)
 	}
 
 	// Enable http profiling server if requested.

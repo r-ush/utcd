@@ -8,6 +8,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 
@@ -64,9 +65,6 @@ type MainNode struct {
 	wg       sync.WaitGroup
 	quit     chan struct{}
 
-	// is the MainNode also a worker?
-	worker bool
-
 	// numWorkers is the amount of workers that are available to perform
 	// the initial block download.
 	numWorkers int32
@@ -74,16 +72,13 @@ type MainNode struct {
 	// all the available workers
 	workers []*Worker
 
-	// server is the underlying btcd server.
-	server *server
-
 	// The UtreexoRootHints that this MainNode must verify to complete
 	// the initial block download.
 	UtreexoRootHints []chaincfg.UtreexoRootHint
 
+	// Below are used to communicate with the workers.
 	rangeProcessed chan *processedURootHint
-	pushWorkChan   chan *chaincfg.UtreexoRootHint
-	getWorkChan    chan *chaincfg.UtreexoRootHint
+	pushWorkChan   chan int32
 }
 
 // initMainNode initializes a new MainNode
@@ -93,19 +88,9 @@ func initMainNode(chainParams *chaincfg.Params, numWorkers int32) (*MainNode, er
 		numWorkers: numWorkers,
 	}
 	mn.UtreexoRootHints = chainParams.UtreexoRootHints
-	//mn.getWorkChan = make(chan *chaincfg.UtreexoRootHint)
-	fmt.Println(len(mn.UtreexoRootHints))
-	//mn.pushWorkChan = make(chan *workerChan, len(mn.UtreexoRootHints))
-	mn.pushWorkChan = make(chan *chaincfg.UtreexoRootHint)
+	mn.pushWorkChan = make(chan int32)
 	mn.rangeProcessed = make(chan *processedURootHint, len(mn.UtreexoRootHints))
 
-	interrupt := make(chan struct{}) // something for newServer func compat
-	newServer, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
-		cfg.AgentWhitelist, nil, activeNetParams.Params, interrupt)
-	if err != nil {
-		return nil, err
-	}
-	mn.server = newServer
 	return &mn, nil
 }
 
@@ -115,7 +100,10 @@ func (mn *MainNode) Start() {
 		return
 	}
 
-	btcdLog.Trace("Starting utreexo main node")
+	btcdLog.Trace("Starting utreexo main node. Verifying %d roots",
+		len(mn.UtreexoRootHints))
+	btcdLog.Infof("Starting utreexo main node. Verifying %d roots",
+		len(mn.UtreexoRootHints))
 	mn.wg.Add(1)
 	go mn.workHandler()
 }
@@ -132,42 +120,76 @@ func (mn *MainNode) Stop() {
 	mn.wg.Wait()
 }
 
-//// QueueUtreexoRootHint queues a utreexo root hint to a worker to be verified.
-//func (mn *MainNode) QueueUtreexoRootHint(rootHint *chaincfg.UtreexoRootHint) bool {
-//	mn.getWorkChan <- rootHint
-//
-//	validated := <-mn.rangeProcessed
-//	return validated
-//}
-
-// QueueRootsToValidate pushes all the UtreexoRootHints that are hardcoded.
-func (mn *MainNode) QueueRootsToValidate() {
-	for _, rootHint := range mn.UtreexoRootHints {
-		btcdLog.Infof("Queuing work for rootHint at height:%v", rootHint.Height)
-		mn.pushWorkChan <- &rootHint
-		//select {
-		//case worker := <-mn.pushWorkChan:
-		//	worker.getWorkChan <- &rootHint
-		//	btcdLog.Infof("Queuing work for rootHint at height:%v for worker:%v", rootHint.Height, worker.num)
-		//case <-mn.quit:
-		//	break
-		//}
-		//if i >= 1 {
-		//	return
-		//}
-	}
-	close(mn.pushWorkChan)
-	fmt.Println("Done QueueRootsToValidate")
+func (mn *MainNode) listenForResults() {
+	// TODO listen for result over network
+	hi := processedURootHint{}
+	mn.rangeProcessed <- &hi
 }
 
+func (mn *MainNode) connectRemoteWorkers(addrs []string) error {
+	for _, addr := range addrs {
+		listenAdr, err := net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			return err
+		}
+
+		listener, err := net.ListenTCP("tcp", listenAdr)
+		if err != nil {
+			return err
+		}
+
+		conn, err := listener.Accept()
+		if err != nil {
+			return err
+		}
+
+		go mn.remoteWorkerHandler(conn)
+	}
+
+	return nil
+}
+
+// remoteWorkerHandler is a function that listens for remote workers and writes
+// a Utreexo root hint to be validated. This function behaves as a "worker" in that
+// it'll listen to the mn.pushWorkChan/mn.rangeProcessed channels and take/push
+// to those channels.
+//
+// This function MUST be ran as a goroutine
+func (mn *MainNode) remoteWorkerHandler(conn net.Conn) {
+	// out:
+	// for {
+	//	// Wait until a worker is free
+	//	readMessage(conn)
+	// 	select {
+	//		case rootHintHeight := <- mn.pushWorkChan:
+	//			conn.Write(rootHintHeight)
+	//		case <-mn.quit:
+	// 			break out
+	// 	}
+	// }
+}
+
+func (mn *MainNode) stopRemoteWorkerHandler() {
+	// listener.Close()
+	// close(conn)
+}
+
+// workHandler is the main workhorse for managing all the workers for the main node.
+// workHandler is responsible for two things:
+// 1. pushing Utreexo root hints to be validated
+// 2. listening to the workers to listen to their validation results
+// When all the UtreexoRootHints hardcoded to the binary is all validated, workHandler
+// will exit and close/send done messages to all the workers.
 func (mn *MainNode) workHandler() {
-	workers := make([]*Worker, 0, mn.numWorkers)
+	mn.workers = make([]*Worker, 0, mn.numWorkers)
 	// Start all the workers
 	for i := int32(0); i < mn.numWorkers; i++ {
-		nw := NewWorker(mn.pushWorkChan, mn.rangeProcessed, i)
-		workers = append(workers, nw)
+		nw := NewLocalWorker(mn.pushWorkChan, mn.rangeProcessed, i)
+		mn.workers = append(mn.workers, &nw)
 		nw.Start()
 	}
+
+	mn.connectRemoteWorkers([]string{"127.0.0.1"})
 
 	// Queue all the rootHints to be validated
 	allRoots := len(mn.UtreexoRootHints)
@@ -176,15 +198,15 @@ func (mn *MainNode) workHandler() {
 
 out:
 	for processedRoots < allRoots {
-		var validateChan chan *chaincfg.UtreexoRootHint
-		var uRootHint *chaincfg.UtreexoRootHint
+		var validateChan chan int32
+		var uRootHintHeight int32
 		if currentRoot < allRoots {
 			validateChan = mn.pushWorkChan
-			uRootHint = &mn.UtreexoRootHints[currentRoot]
+			uRootHintHeight = mn.UtreexoRootHints[currentRoot].Height
 		}
 		select {
-		case validateChan <- uRootHint:
-			btcdLog.Infof("Queuing root at height %v", uRootHint.Height)
+		case validateChan <- uRootHintHeight:
+			btcdLog.Infof("Queuing root at height %v", uRootHintHeight)
 			currentRoot++
 		case processed := <-mn.rangeProcessed:
 			btcdLog.Infof("Processed root at height:%v", processed.URootHint.Height)
@@ -204,23 +226,184 @@ out:
 	btcdLog.Infof("Done verifying all roots")
 
 	// Stop all the workers
-	for _, worker := range workers {
-		worker.Stop()
-		worker.WaitForShutdown()
+	for _, worker := range mn.workers {
+		(*worker).Stop()
+		(*worker).WaitForShutdown()
 	}
 
-	mn.server.Stop()
-	mn.server.WaitForShutdown()
 	mn.wg.Done()
 	btcdLog.Trace("work handler done")
-	fmt.Println("Done")
+	btcdLog.Infof("Main node work handler done")
 }
 
-// Worker is the UtreexoRootHint verifying worker that is in itself, a completely
-// independent utreexo full node. It has a fully working server and will connect
-// out to peers to download blocks. When it finishes verifying the UtreexoRootHint,
-// it sends a message back to the main node that the UtreexoRootHint was verified.
-type Worker struct {
+// Worker is a node that takes in a height of a Utreexo root hint to verify and splits out
+// the results of the verification. A Worker can be either local or remote.
+// A Worker is in itself, a completely independent utreexo full node. It has a
+// fully working server and will connect out to peers to download blocks. When it
+// finishes verifying the UtreexoRootHint, it sends a message back to the main
+// node that the UtreexoRootHint was verified.
+type Worker interface {
+	GetWork()
+	PushResults(*processedURootHint)
+	Start()
+	Stop()
+	WaitForShutdown()
+}
+
+type RemoteWorker struct {
+	num       int8
+	started   int32
+	shutdown  int32
+	verifying int32
+	wg        sync.WaitGroup
+	quit      chan struct{}
+
+	// server is the underlying btcd server.
+	server *server
+
+	// Below are used to communicate with the main node.
+	getWorkConn    net.Conn
+	getWorkChan    chan int32
+	rangeProcessed chan *processedURootHint
+
+	// Below are used to listen for the worker's server to finish verifying the
+	// rootHint.
+	valChan           chan bool
+	inProcessRootHint *chaincfg.UtreexoRootHint
+}
+
+func NewRemoteWorker(num int8) Worker {
+	rwrk := RemoteWorker{
+		num:  num,
+		quit: make(chan struct{}),
+		//rangeProcessed: rangeProcessed,
+		//getWorkChan:    getWorkChan,
+		getWorkChan: make(chan int32, 1),
+		valChan:     make(chan bool, 1),
+	}
+	return &rwrk
+}
+
+func (rwrk *RemoteWorker) GetWork() {
+}
+
+func (rwrk *RemoteWorker) PushResults(*processedURootHint) {
+}
+
+func (rwrk *RemoteWorker) Start() {
+	// Already started?
+	if atomic.AddInt32(&rwrk.started, 1) != 1 {
+		return
+	}
+
+	btcdLog.Trace("Starting utreexo remote worker")
+	btcdLog.Infof("Starting utreexo remote worker")
+	rwrk.wg.Add(1)
+	go rwrk.workHandler()
+}
+
+func (rwrk *RemoteWorker) Stop() {
+	if atomic.AddInt32(&rwrk.shutdown, 1) != 1 {
+		btcdLog.Warnf("Remote worker is already in the process of " +
+			"shutting down")
+		return
+	}
+	btcdLog.Infof("remote worker shutting down")
+	close(rwrk.quit)
+	rwrk.wg.Wait()
+	return
+}
+
+func (rwrk *RemoteWorker) WaitForShutdown() {
+	// nothing to wait for for remote workers, just quit
+	return
+}
+
+// workHandler is the main workhorse for recieving utreexo roots to verify. workHandler
+// must be called as a goroutine.
+func (rwrk *RemoteWorker) workHandler() {
+out:
+	for {
+		// If we're in the process of verifying something, block here and don't
+		// queue up for another rootHint
+		if rwrk.inProcessRootHint != nil {
+			select {
+			case verified := <-rwrk.valChan:
+				// TODO push here
+				rwrk.PushResults(
+					&processedURootHint{
+						Validated: verified,
+						URootHint: rwrk.inProcessRootHint,
+					},
+				)
+
+				// shutdown server to free the memory
+				rwrk.server.Stop()
+				rwrk.server.WaitForShutdown()
+				rwrk.server = nil
+
+				// set inProcessRootHint to nil since we're not
+				// verifying anything anymore
+				rwrk.inProcessRootHint = nil
+			case <-rwrk.quit:
+				break out
+			}
+		}
+
+		// We're not verifying anything at the moment so queue up for a rootHint
+		btcdLog.Infof("remote worker num %v queuing for work", rwrk.num)
+
+		rwrk.GetWork()
+		// TODO receive work here
+		select {
+		case uRootHintToVerifyHeight, ok := <-rwrk.getWorkChan:
+			if ok {
+				btcdLog.Infof("Work received for rootHint height:%v for worker:%v",
+					uRootHintToVerifyHeight, rwrk.num)
+
+				// if the channel is still open, go through the verification steps
+				interrupt := make(chan struct{}) // something for newServer func compat
+
+				newServer, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
+					cfg.AgentWhitelist, nil, activeNetParams.Params, interrupt)
+				if err != nil {
+					fmt.Println(err)
+					btcdLog.Errorf("Unable to create server for the worker: %v", err)
+					return
+				}
+
+				rwrk.server = newServer
+
+				// Grab the rootHint for the provided height. If nil, then panic since the
+				// worker's rootHints are different from that of the main node
+				rwrk.inProcessRootHint = rwrk.server.chain.FindRootHintByHeight(uRootHintToVerifyHeight)
+				if rwrk.inProcessRootHint == nil {
+					err = fmt.Errorf("Unable to find the Utreexo Root Hint for height: %v. Panicking...", uRootHintToVerifyHeight)
+					btcdLog.Errorf("%s", err)
+					panic(err)
+				}
+
+				rwrk.server.StartUtreexoRootHintVerify(
+					rwrk.inProcessRootHint, rwrk.valChan)
+			} else {
+				break out
+			}
+		case <-rwrk.quit:
+			break out
+		}
+	}
+
+	if rwrk.server != nil {
+		rwrk.server.Stop()
+		rwrk.server.WaitForShutdown()
+	}
+
+	rwrk.wg.Done()
+	btcdLog.Trace("work handler done")
+	btcdLog.Infof("work handler done")
+}
+
+type LocalWorker struct {
 	num       int32
 	started   int32
 	shutdown  int32
@@ -231,28 +414,41 @@ type Worker struct {
 	// server is the underlying btcd server.
 	server *server
 
-	workChan       *workerChan
-	getWorkChan    chan *chaincfg.UtreexoRootHint
+	// Below are used to communicate with the main node.
+	getWorkChan    chan int32
+	getWorkChanLol chan int32
 	rangeProcessed chan *processedURootHint
 
-	//valChan           chan bool
-	//inProcessRootHint *chaincfg.UtreexoRootHint
+	// Below are used to listen for the worker's server to finish verifying the
+	// rootHint.
+	valChan           chan bool
+	inProcessRootHint *chaincfg.UtreexoRootHint
 }
 
-func NewWorker(getWorkChan chan *chaincfg.UtreexoRootHint, rangeProcessed chan *processedURootHint, num int32) *Worker {
-	wrk := Worker{
+func (wrk *LocalWorker) GetWork() {
+	height, ok := <-wrk.getWorkChan
+	if ok {
+		wrk.getWorkChanLol <- height
+	}
+}
+
+func (wrk *LocalWorker) PushResults(result *processedURootHint) {
+	wrk.rangeProcessed <- result
+}
+
+func NewLocalWorker(getWorkChan chan int32, rangeProcessed chan *processedURootHint, num int32) Worker {
+	wrk := LocalWorker{
 		num:            num,
 		quit:           make(chan struct{}),
 		rangeProcessed: rangeProcessed,
 		getWorkChan:    getWorkChan,
-		//valChan:        make(chan bool, 1),
-		workChan: &workerChan{num,
-			make(chan *chaincfg.UtreexoRootHint, 1)},
+		getWorkChanLol: make(chan int32, 1),
+		valChan:        make(chan bool, 1),
 	}
 	return &wrk
 }
 
-func (wrk *Worker) Start() {
+func (wrk *LocalWorker) Start() {
 	// Already started?
 	if atomic.AddInt32(&wrk.started, 1) != 1 {
 		return
@@ -264,7 +460,7 @@ func (wrk *Worker) Start() {
 	go wrk.workHandler()
 }
 
-func (wrk *Worker) Stop() {
+func (wrk *LocalWorker) Stop() {
 	if atomic.AddInt32(&wrk.shutdown, 1) != 1 {
 		btcdLog.Warnf("Worker is already in the process of " +
 			"shutting down")
@@ -276,47 +472,65 @@ func (wrk *Worker) Stop() {
 }
 
 // WaitForShutdown blocks until the main listener and peer handlers are stopped.
-func (wrk *Worker) WaitForShutdown() {
+func (wrk *LocalWorker) WaitForShutdown() {
 	wrk.wg.Wait()
 }
 
 // isVerifying returns if the worker is currently busy verifying a utreexo
 // root hint.
-func (wrk *Worker) isVerifying() bool {
+func (wrk *LocalWorker) isVerifying() bool {
 	return atomic.AddInt32(&wrk.verifying, 1) != 1
 }
 
-//// QueueUtreexoRootHint queues a utreexo root hint to a worker to be verified.
-//func (wrk *Worker) QueueUtreexoRootHint(rootHint *chaincfg.UtreexoRootHint) (bool, int32) {
-//	wrk.getWorkChan <- rootHint
-//
-//	validated := <-wrk.rangeProcessed
-//	return validated, rootHint.Height
-//}
-
 // workHandler is the main workhorse for recieving utreexo roots to verify. workHandler
 // must be called as a goroutine.
-func (wrk *Worker) workHandler() {
-	// async func lisening for quit
-	go func() {
-		select {
-		case <-wrk.quit:
-			close(wrk.getWorkChan)
-			wrk.server.Stop()
-			wrk.server.WaitForShutdown()
-
-			wrk.wg.Done()
-			btcdLog.Trace("work handler done")
-		}
-	}()
+func (wrk *LocalWorker) workHandler() {
 out:
 	for {
+		// If we're in the process of verifying something, block here and don't
+		// queue up for another rootHint
+		if wrk.inProcessRootHint != nil {
+			select {
+			case verified := <-wrk.valChan:
+				// TODO push here
+				wrk.PushResults(
+					&processedURootHint{
+						Validated: verified,
+						URootHint: wrk.inProcessRootHint,
+					},
+				)
+				//wrk.rangeProcessed <- &processedURootHint{
+				//	Validated: verified,
+				//	URootHint: wrk.inProcessRootHint,
+				//}
+
+				// shutdown server to free the memory
+				wrk.server.Stop()
+				wrk.server.WaitForShutdown()
+				wrk.server = nil
+
+				// set inProcessRootHint to nil since we're not
+				// verifying anything anymore
+				wrk.inProcessRootHint = nil
+			case <-wrk.quit:
+				break out
+			}
+		}
+
+		// We're not verifying anything at the moment so queue up for a rootHint
 		btcdLog.Infof("worker num %v queuing for work", wrk.num)
+
+		// TODO ugly. Since we just introduce another channel for the worker
+		// just to share an interface with the RemoteWorker.
+		// Whatevs
+		wrk.GetWork()
+		// TODO receive work here
 		select {
-		case uRootHintToVerify, ok := <-wrk.getWorkChan:
+		case uRootHintToVerifyHeight, ok := <-wrk.getWorkChanLol:
 			if ok {
 				btcdLog.Infof("Work received for rootHint height:%v for worker:%v",
-					uRootHintToVerify.Height, wrk.num)
+					uRootHintToVerifyHeight, wrk.num)
+
 				// if the channel is still open, go through the verification steps
 				interrupt := make(chan struct{}) // something for newServer func compat
 
@@ -327,38 +541,34 @@ out:
 					btcdLog.Errorf("Unable to create server for the worker: %v", err)
 					return
 				}
+
 				wrk.server = newServer
 
-				//wrk.inProcessRootHint = uRootHintToVerify
-				valChan := make(chan bool, 1)
-
-				wrk.server.StartUtreexoRootHintVerify(uRootHintToVerify, valChan)
-				verified := <-valChan
-				fmt.Println("verified", verified)
-				wrk.rangeProcessed <- &processedURootHint{
-					Validated: verified,
-					URootHint: uRootHintToVerify,
+				// Grab the rootHint for the provided height. If nil, then panic since the
+				// worker's rootHints are different from that of the main node
+				wrk.inProcessRootHint = wrk.server.chain.FindRootHintByHeight(uRootHintToVerifyHeight)
+				if wrk.inProcessRootHint == nil {
+					err = fmt.Errorf("Unable to find the Utreexo Root Hint for height: %v. Panicking...", uRootHintToVerifyHeight)
+					btcdLog.Errorf("%s", err)
+					panic(err)
 				}
+
+				wrk.server.StartUtreexoRootHintVerify(
+					wrk.inProcessRootHint, wrk.valChan)
 			} else {
 				break out
 			}
+		case <-wrk.quit:
+			break out
 		}
-		//case verified := <-wrk.valChan:
-		//	//verified := <-valChan
-		//	fmt.Println("verified", verified)
-		//	wrk.rangeProcessed <- &processedURootHint{
-		//		Validated: verified,
-		//		URootHint: wrk.inProcessRootHint,
-		//	}
-		//	wrk.inProcessRootHint = nil
-		//case <-wrk.quit:
-		//	break out
-		//}
 	}
 
-	wrk.server.Stop()
-	wrk.server.WaitForShutdown()
+	if wrk.server != nil {
+		wrk.server.Stop()
+		wrk.server.WaitForShutdown()
+	}
 
 	wrk.wg.Done()
 	btcdLog.Trace("work handler done")
+	btcdLog.Infof("work handler done")
 }

@@ -2748,7 +2748,7 @@ func (s *server) Stop() error {
 	}
 
 	// Only access the database if we're not in the utreexo root verify mode
-	if s.chain.UtreexoRootBeingVerified() == nil && !cfg.UtreexoWorker {
+	if s.chain.UtreexoRootBeingVerified() == nil && !cfg.UtreexoWorker && !cfg.UtreexoMainNode {
 		// Save fee estimator state in the database.
 		s.db.Update(func(tx database.Tx) error {
 			metadata := tx.Metadata()
@@ -3093,7 +3093,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	}
 
 	var utreexoRootVerifyMode bool
-	if cfg.UtreexoWorker || cfg.UtreexoRootVerifyHeight > 0 {
+	if cfg.UtreexoWorker || cfg.UtreexoMainNode || cfg.UtreexoRootVerifyHeight > 0 {
 		utreexoRootVerifyMode = true
 	}
 
@@ -3125,7 +3125,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 
 	fmt.Println("cfg.UtreexoWorker", cfg.UtreexoWorker)
 	// Only access the database if we're not in utreexo root verify mode
-	if utreexoRootToVerify == nil && !cfg.UtreexoWorker {
+	if utreexoRootToVerify == nil && !cfg.UtreexoWorker && !cfg.UtreexoMainNode {
 		// Search for a FeeEstimator state in the database. If none can be found
 		// or if it cannot be loaded, create a new one.
 		db.Update(func(tx database.Tx) error {

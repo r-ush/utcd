@@ -148,7 +148,6 @@ type BlockChain struct {
 	utreexoRootHintsByHeight map[int32]*chaincfg.UtreexoRootHint
 	utreexoRootToVerify      *chaincfg.UtreexoRootHint
 	UtreexoRootVerifyMode    bool
-	utreexoStartRoot         *chaincfg.UtreexoRootHint
 
 	utreexoLookAhead int               // set a value for the ttl
 	memBlock         *memBlockStore    // one block stored in memory
