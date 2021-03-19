@@ -309,6 +309,29 @@ func NewRemoteWorker(num int8) Worker {
 }
 
 func (rwrk *RemoteWorker) GetWork() {
+	// If we have this channel, we can have a blocking read
+	// while also listening for the quit signal
+	workChan := make(chan int32)
+	go func() {
+		// Tell the main node we're ready
+		rwrk.getWorkConn.Write([]byte{})
+
+		// grab the height from the main node
+		buf := make([]byte, 4)
+		rwrk.getWorkConn.Read(buf)
+		height := int32(binary.BigEndian.Uint32(buf))
+		workChan <- height
+	}()
+out:
+	for {
+		select {
+		case height := <-workChan:
+			rwrk.getWorkChan <- height
+			break out
+		case <-rwrk.quit:
+			break out
+		}
+	}
 }
 
 func (rwrk *RemoteWorker) PushResults(*processedURootHint) {
@@ -339,7 +362,7 @@ func (rwrk *RemoteWorker) Stop() {
 }
 
 func (rwrk *RemoteWorker) WaitForShutdown() {
-	// nothing to wait for for remote workers, just quit
+	rwrk.wg.Wait()
 	return
 }
 
