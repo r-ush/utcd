@@ -127,34 +127,28 @@ func (mn *MainNode) listenForResults() {
 	mn.rangeProcessed <- &hi
 }
 
-func (mn *MainNode) connectRemoteWorkers(addrs []string) {
+func (mn *MainNode) listenForRemoteWorkers() {
 	var workerCount int
-	for _, addr := range addrs {
-		listenAdr, err := net.ResolveTCPAddr("tcp", addr)
-		if err != nil {
-			btcdLog.Warnf("Couldn't connect to remote worker %v, err: %s",
-				addr, err)
-			continue
-		}
+	listenAdr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:5555")
+	if err != nil {
+		btcdLog.Warnf("Couldn't resolve TCP addr err: %s", err)
+	}
 
-		listener, err := net.ListenTCP("tcp", listenAdr)
-		if err != nil {
-			btcdLog.Warnf("Couldn't connect to remote worker %v, err: %s",
-				addr, err)
-			continue
-		}
-
+	listener, err := net.ListenTCP("tcp", listenAdr)
+	if err != nil {
+		btcdLog.Warnf("Couldn't open TCP listener at %v, err: %s",
+			listenAdr, err)
+	}
+	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			btcdLog.Warnf("Couldn't connect to remote worker %v, err: %s",
-				addr, err)
+			btcdLog.Warnf("Couldn't accept remote connection err: %s", err)
 			continue
 		}
 
 		go mn.remoteWorkerHandler(conn)
 		workerCount++
 	}
-
 	btcdLog.Infof("Started %d remote workers", workerCount)
 }
 
@@ -212,8 +206,7 @@ func (mn *MainNode) workHandler() {
 		nw.Start()
 	}
 
-	remoteWorkers := []string{"127.0.0.1"}
-	mn.connectRemoteWorkers(remoteWorkers)
+	go mn.listenForRemoteWorkers()
 
 	// Queue all the rootHints to be validated
 	allRoots := len(mn.UtreexoRootHints)
