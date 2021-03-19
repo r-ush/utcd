@@ -307,15 +307,13 @@ func (rwrk *RemoteWorker) GetWork() {
 		height := int32(binary.BigEndian.Uint32(buf))
 		workChan <- height
 	}()
-out:
-	for {
-		select {
-		case height := <-workChan:
-			rwrk.getWorkChan <- height
-			break out
-		case <-rwrk.quit:
-			break out
-		}
+
+	select {
+	case height := <-workChan:
+		rwrk.getWorkChan <- height
+		break
+	case <-rwrk.quit:
+		break
 	}
 }
 
@@ -411,7 +409,6 @@ out:
 				newServer, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
 					cfg.AgentWhitelist, nil, activeNetParams.Params, interrupt)
 				if err != nil {
-					fmt.Println(err)
 					btcdLog.Errorf("Unable to create server for the worker: %v", err)
 					return
 				}
