@@ -271,7 +271,7 @@ type RemoteWorker struct {
 	server *server
 
 	// Below are used to communicate with the main node.
-	getWorkConn    net.Conn
+	coordCon       net.Conn
 	getWorkChan    chan int32
 	rangeProcessed chan *processedURootHint
 
@@ -299,11 +299,11 @@ func (rwrk *RemoteWorker) GetWork() {
 	workChan := make(chan int32)
 	go func() {
 		// Tell the main node we're ready
-		rwrk.getWorkConn.Write([]byte{})
+		rwrk.coordCon.Write([]byte{})
 
 		// grab the height from the main node
 		buf := make([]byte, 4)
-		rwrk.getWorkConn.Read(buf)
+		rwrk.coordCon.Read(buf)
 		height := int32(binary.BigEndian.Uint32(buf))
 		workChan <- height
 	}()
@@ -330,6 +330,18 @@ func (rwrk *RemoteWorker) Start() {
 
 	btcdLog.Trace("Starting utreexo remote worker")
 	btcdLog.Infof("Starting utreexo remote worker")
+
+	dialAddr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:5555")
+	if err != nil {
+		btcdLog.Errorf("Couldn't resolve TCP addr err: %s", err)
+	}
+
+	rwrk.coordCon, err = net.DialTCP("tcp", nil, dialAddr)
+	if err != nil {
+		btcdLog.Warnf("Couldn't connect to coordinator at %v, err: %s",
+			dialAddr, err)
+	}
+
 	rwrk.wg.Add(1)
 	go rwrk.workHandler()
 }
