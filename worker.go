@@ -55,7 +55,7 @@ type processedURootHint struct {
 
 type workerChan struct {
 	num         int32
-	getWorkChan chan *chaincfg.UtreexoRootHint
+	getWorkChan chan int32
 }
 
 // MainNode is the main node for doing the initial block download. MainNode hands
@@ -149,7 +149,6 @@ func (mn *MainNode) listenForRemoteWorkers() {
 		go mn.remoteWorkerHandler(conn)
 		workerCount++
 	}
-	btcdLog.Infof("Started %d remote workers", workerCount)
 }
 
 // remoteWorkerHandler is a function that listens for remote workers and writes
@@ -159,32 +158,22 @@ func (mn *MainNode) listenForRemoteWorkers() {
 //
 // This function MUST be ran as a goroutine
 func (mn *MainNode) remoteWorkerHandler(conn net.Conn) {
-	workerFreeChan := make(chan struct{})
-	go func() {
+out:
+	for {
 		// Wait until a worker is free
 		var b []byte
 		conn.Read(b)
-		workerFreeChan <- struct{}{}
-	}()
-out:
-	for {
+
 		select {
-		// When a worker is free, start queuing up for the rootHint
-		case <-workerFreeChan:
-			select {
-			case rootHintHeight := <-mn.pushWorkChan:
-				serialized := make([]byte, 4)
-				binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
-				conn.Write(serialized)
-			case <-mn.quit:
-				break out
-			}
+		case rootHintHeight := <-mn.pushWorkChan:
+			serialized := make([]byte, 4)
+			binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
+			conn.Write(serialized)
 		case <-mn.quit:
 			break out
 		}
 	}
 
-	close(workerFreeChan) // this doesn't do anything oh well
 	err := conn.Close()
 	if err != nil {
 		btcdLog.Errorf("remoteWorkerHandler connection close err: %s", err)
@@ -215,6 +204,9 @@ func (mn *MainNode) workHandler() {
 
 out:
 	for processedRoots < allRoots {
+		// Only send items while there are still items that need to
+		// be processed.  The select statement will never select a nil
+		// channel.
 		var validateChan chan int32
 		var uRootHintHeight int32
 		if currentRoot < allRoots {
