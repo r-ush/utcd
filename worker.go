@@ -317,7 +317,13 @@ func (rwrk *RemoteWorker) GetWork() {
 	}
 }
 
-func (rwrk *RemoteWorker) PushResults(*processedURootHint) {
+func (rwrk *RemoteWorker) PushResults(p *processedURootHint) {
+	if p.Validated {
+		rwrk.coordCon.Write([]byte{0x01})
+	} else {
+		rwrk.coordCon.Write([]byte{0x00})
+	}
+	_ = binary.Write(rwrk.coordCon, binary.BigEndian, p.URootHint.Height)
 }
 
 func (rwrk *RemoteWorker) Start() {
