@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
@@ -126,27 +127,35 @@ func (mn *MainNode) listenForResults() {
 	mn.rangeProcessed <- &hi
 }
 
-func (mn *MainNode) connectRemoteWorkers(addrs []string) error {
+func (mn *MainNode) connectRemoteWorkers(addrs []string) {
+	var workerCount int
 	for _, addr := range addrs {
 		listenAdr, err := net.ResolveTCPAddr("tcp", addr)
 		if err != nil {
-			return err
+			btcdLog.Warnf("Couldn't connect to remote worker %v, err: %s",
+				addr, err)
+			continue
 		}
 
 		listener, err := net.ListenTCP("tcp", listenAdr)
 		if err != nil {
-			return err
+			btcdLog.Warnf("Couldn't connect to remote worker %v, err: %s",
+				addr, err)
+			continue
 		}
 
 		conn, err := listener.Accept()
 		if err != nil {
-			return err
+			btcdLog.Warnf("Couldn't connect to remote worker %v, err: %s",
+				addr, err)
+			continue
 		}
 
 		go mn.remoteWorkerHandler(conn)
+		workerCount++
 	}
 
-	return nil
+	btcdLog.Infof("Started %d remote workers", workerCount)
 }
 
 // remoteWorkerHandler is a function that listens for remote workers and writes
@@ -156,22 +165,36 @@ func (mn *MainNode) connectRemoteWorkers(addrs []string) error {
 //
 // This function MUST be ran as a goroutine
 func (mn *MainNode) remoteWorkerHandler(conn net.Conn) {
-	// out:
-	// for {
-	//	// Wait until a worker is free
-	//	readMessage(conn)
-	// 	select {
-	//		case rootHintHeight := <- mn.pushWorkChan:
-	//			conn.Write(rootHintHeight)
-	//		case <-mn.quit:
-	// 			break out
-	// 	}
-	// }
-}
+	workerFreeChan := make(chan struct{})
+	go func() {
+		// Wait until a worker is free
+		var b []byte
+		conn.Read(b)
+		workerFreeChan <- struct{}{}
+	}()
+out:
+	for {
+		select {
+		// When a worker is free, start queuing up for the rootHint
+		case <-workerFreeChan:
+			select {
+			case rootHintHeight := <-mn.pushWorkChan:
+				serialized := make([]byte, 4)
+				binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
+				conn.Write(serialized)
+			case <-mn.quit:
+				break out
+			}
+		case <-mn.quit:
+			break out
+		}
+	}
 
-func (mn *MainNode) stopRemoteWorkerHandler() {
-	// listener.Close()
-	// close(conn)
+	close(workerFreeChan) // this doesn't do anything oh well
+	err := conn.Close()
+	if err != nil {
+		btcdLog.Errorf("remoteWorkerHandler connection close err: %s", err)
+	}
 }
 
 // workHandler is the main workhorse for managing all the workers for the main node.
@@ -189,7 +212,8 @@ func (mn *MainNode) workHandler() {
 		nw.Start()
 	}
 
-	mn.connectRemoteWorkers([]string{"127.0.0.1"})
+	remoteWorkers := []string{"127.0.0.1"}
+	mn.connectRemoteWorkers(remoteWorkers)
 
 	// Queue all the rootHints to be validated
 	allRoots := len(mn.UtreexoRootHints)
