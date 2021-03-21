@@ -174,6 +174,7 @@ type config struct {
 	UtreexoRootVerifyHeight int           `long:"utreexorootverifyheight" description:"The height of the utreexo root to checkfor"`
 	UtreexoMainNode         bool          `long:"utreexomain" description:"Enable the ability to have remote workers for UtreexoRootVerifyMode"`
 	UtreexoWorker           bool          `long:"utreexoworker" description:"Make this node a worker for a UtreexoMainNode"`
+	MainNodeIP              string        `long:"mainnodeip" description:"IP to connect to for a UtreexoWorker"`
 	TorIsolation            bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
 	TrickleInterval         time.Duration `long:"trickleinterval" description:"Minimum time between attempts to send new inventory to a connected peer"`
 	UserAgentComments       []string      `long:"uacomment" description:"Comment to add to the user agent -- See BIP 14 for more information."`
