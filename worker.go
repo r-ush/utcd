@@ -18,38 +18,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
-//// UtreexoRootHintsToVerify is the UtreexoRootHints with metadata to keep
-//// track of the verification stage.
-//type UtreexoRootHintsToVerify struct {
-//	// RootHint is the underlying utreexo root hint.
-//	RootHint *chaincfg.UtreexoRootHint
-//
-//	// Verified sets if the underlying utreexoRootHint is verified or
-//	// not.
-//	Verified bool
-//}
-//
-//// initializes the UtreexoRootHintsToVerify
-//func initUtreexoRootHintsToVerify(chainParams *chaincfg.Params) []*UtreexoRootHintsToVerify {
-//	// init capacity based on the length of the hardcoded root hints.
-//	rootHints := make([]*UtreexoRootHintsToVerify, 0,
-//		len(chainParams.UtreexoRootHints))
-//
-//	for _, rootHint := range chainParams.UtreexoRootHints {
-//		rootHints = append(rootHints, &UtreexoRootHintsToVerify{
-//			RootHint: &rootHint,
-//			Verified: false,
-//		})
-//	}
-//
-//	return rootHints
-//}
-
-//// findViablePort keeps incrementing the port until a suitable one is found
-//func findViablePort() int32 {
-//	return 0
-//}
-
 const (
 	MagicBytes   uint32 = 0xd9b4befa
 	NewNodeReady uint32 = 0xfffffffa
@@ -90,11 +58,25 @@ type MainNode struct {
 
 	// The UtreexoRootHints that this MainNode must verify to complete
 	// the initial block download.
-	UtreexoRootHints []chaincfg.UtreexoRootHint
+	UtreexoRootHints []int32
+	//UtreexoRootHints []chaincfg.UtreexoRootHint
 
 	// Below are used to communicate with the workers.
 	rangeProcessed chan *processedURootHint
 	pushWorkChan   chan int32
+}
+
+// initializes the UtreexoRootHintsToVerify
+func initUtreexoRootHintsToVerify(chainParams *chaincfg.Params) []int32 {
+	// init capacity based on the length of the hardcoded root hints.
+	rootHints := make([]int32, 0,
+		len(chainParams.UtreexoRootHints))
+
+	for _, rootHint := range chainParams.UtreexoRootHints {
+		rootHints = append(rootHints, rootHint.Height)
+	}
+
+	return rootHints
 }
 
 // initMainNode initializes a new MainNode
@@ -103,7 +85,7 @@ func initMainNode(chainParams *chaincfg.Params, numWorkers int32) (*MainNode, er
 		quit:       make(chan struct{}),
 		numWorkers: numWorkers,
 	}
-	mn.UtreexoRootHints = chainParams.UtreexoRootHints
+	mn.UtreexoRootHints = initUtreexoRootHintsToVerify(chainParams)
 	mn.pushWorkChan = make(chan int32)
 	mn.rangeProcessed = make(chan *processedURootHint, len(mn.UtreexoRootHints))
 
@@ -173,12 +155,13 @@ func (mn *MainNode) listenForRemoteWorkers() {
 //
 // This function MUST be ran as a goroutine
 func (mn *MainNode) remoteWorkerHandler(conn net.Conn) {
+
+	var rootInProcess int32 = -1
 out:
 	for {
 		// Listen to workers
 		var header [HeaderSize]byte
 		_, err := io.ReadFull(conn, header[:])
-		fmt.Println("READ", header)
 		if err != nil {
 			if err == io.EOF {
 				btcdLog.Infof("remoteWorkerHandler read EOF while reading header. Disconnecting remote worker")
@@ -223,6 +206,7 @@ out:
 					serialized := make([]byte, 4)
 					binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
 					conn.Write(serialized)
+					rootInProcess = rootHintHeight
 				} else {
 					break out
 				}
@@ -235,6 +219,7 @@ out:
 			if bytes.Equal(verification, []byte{0x01}) {
 				valid = true
 			}
+			rootInProcess = -1
 
 			height := binary.BigEndian.Uint32(payload[1:])
 			mn.rangeProcessed <- &processedURootHint{
@@ -245,6 +230,10 @@ out:
 			btcdLog.Errorf("remoteWorkerHandler got an unknown message command of %s from remote worker", commandString)
 		}
 
+	}
+
+	if rootInProcess != -1 {
+		mn.UtreexoRootHints = append(mn.UtreexoRootHints, rootInProcess)
 	}
 
 	err := conn.Close()
@@ -272,7 +261,7 @@ func (mn *MainNode) workHandler() {
 
 	// Queue all the rootHints to be validated
 	allRoots := len(mn.UtreexoRootHints)
-	currentRoot := 0
+	//currentRoot := 0
 	processedRoots := 0
 
 out:
@@ -282,17 +271,22 @@ out:
 		// channel.
 		var validateChan chan int32
 		var uRootHintHeight int32
-		if currentRoot < allRoots {
+		if len(mn.UtreexoRootHints) < allRoots {
 			validateChan = mn.pushWorkChan
-			uRootHintHeight = mn.UtreexoRootHints[currentRoot].Height
+
+			// pop from the queue
+			uRootHintHeight = mn.UtreexoRootHints[len(mn.UtreexoRootHints)-1]
+			mn.UtreexoRootHints = mn.UtreexoRootHints[:len(mn.UtreexoRootHints)-1]
+			//uRootHintHeight = mn.UtreexoRootHints[currentRoot].Height
 		}
 		select {
 		case validateChan <- uRootHintHeight:
 			btcdLog.Infof("Queuing root at height %v", uRootHintHeight)
-			currentRoot++
+			//currentRoot++
 		case processed := <-mn.rangeProcessed:
 			btcdLog.Infof("Processed root at height:%v", processed.URootHintHeight)
 			processedRoots++
+			//uRootHintHeight = mn.UtreexoRootHints[currentRoot].Height
 			if !processed.Validated {
 				// If a root is wrong, panic. The binary is incorrect
 				// and there's no way of recovering from this.
