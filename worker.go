@@ -41,6 +41,61 @@ type remoteWorkerMsgHeader struct {
 	length  uint32 // 4 bytes
 }
 
+func readWorkerMsgHeader(reader io.Reader) (*remoteWorkerMsgHeader, error) {
+	rwhdr := &remoteWorkerMsgHeader{}
+
+	headerBuf := make([]byte, HeaderSize)
+	_, err := io.ReadFull(reader, headerBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	rwhdr.magic = binary.BigEndian.Uint32(headerBuf[:4])
+	if rwhdr.magic != MagicBytes {
+		err = fmt.Errorf("readMsgHeader read wrong magic bytes of "+"%v",
+			rwhdr.magic)
+		return nil, err
+	}
+
+	// Read command.
+	commandBuf := make([]byte, CommandSize)
+	copy(commandBuf, headerBuf[4:4+12])
+	// Strip trailing zeros from command string.
+	rwhdr.command = string(bytes.TrimRight(commandBuf, "\x00"))
+
+	rwhdr.length = binary.BigEndian.Uint32(headerBuf[16 : 16+4])
+
+	return rwhdr, nil
+}
+
+//func writeWorkerMsg(writer io.Writer, cmd string) {
+//	var command [CommandSize]byte
+//	copy(command[:], []byte(cmd))
+//
+//	// Create header for the message.
+//	hdr := remoteWorkerMsgHeader{}
+//	hdr.magic = MagicBytes
+//	hdr.command = cmd
+//
+//	hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
+//	buf := make([]byte, 4)
+//
+//	binary.BigEndian.PutUint32(buf, hdr.magic)
+//	hw.Write(buf)
+//	hw.Write(command[:])
+//
+//	serialized := make([]byte, 4)
+//	binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
+//	hdr.length = uint32(len(serialized))
+//
+//	binary.BigEndian.PutUint32(buf, hdr.length)
+//	hw.Write(buf)
+//
+//	hw.Write(serialized)
+//
+//	conn.Write(hw.Bytes())
+//}
+
 // MainNode is the main node for doing the initial block download. MainNode hands
 // off work to other nodes if they are available.
 type MainNode struct {
@@ -48,6 +103,7 @@ type MainNode struct {
 	shutdown int32
 	wg       sync.WaitGroup
 	quit     chan struct{}
+	refresh  chan struct{}
 
 	// numWorkers is the amount of workers that are available to perform
 	// the initial block download.
@@ -83,6 +139,7 @@ func initUtreexoRootHintsToVerify(chainParams *chaincfg.Params) []int32 {
 func initMainNode(chainParams *chaincfg.Params, numWorkers int32) (*MainNode, error) {
 	mn := MainNode{
 		quit:       make(chan struct{}),
+		refresh:    make(chan struct{}),
 		numWorkers: numWorkers,
 	}
 	mn.UtreexoRootHints = initUtreexoRootHintsToVerify(chainParams)
@@ -155,13 +212,11 @@ func (mn *MainNode) listenForRemoteWorkers() {
 //
 // This function MUST be ran as a goroutine
 func (mn *MainNode) remoteWorkerHandler(conn net.Conn) {
-
-	var rootInProcess int32 = -1
+	rootInProcess := make(map[int32]struct{})
 out:
 	for {
 		// Listen to workers
-		var header [HeaderSize]byte
-		_, err := io.ReadFull(conn, header[:])
+		header, err := readWorkerMsgHeader(conn)
 		if err != nil {
 			if err == io.EOF {
 				btcdLog.Infof("remoteWorkerHandler read EOF while reading header. Disconnecting remote worker")
@@ -171,23 +226,8 @@ out:
 			panic(err)
 		}
 
-		if binary.BigEndian.Uint32(header[:4]) != MagicBytes {
-			btcdLog.Errorf("Message from worker has wrong magic bytes of "+
-				"%v", binary.BigEndian.Uint32(header[:4]))
-			panic(err)
-		}
-
-		// Read command.
-		command := make([]byte, CommandSize)
-		copy(command, header[4:4+12])
-		// Strip trailing zeros from command string.
-		commandString := string(bytes.TrimRight(command, "\x00"))
-		fmt.Println("commandString", commandString)
-
-		length := binary.BigEndian.Uint32(header[16:])
-
 		// Read payload.
-		payload := make([]byte, length)
+		payload := make([]byte, header.length)
 		_, err = io.ReadFull(conn, payload)
 		if err != nil {
 			if err == io.EOF {
@@ -198,15 +238,42 @@ out:
 			panic(err)
 		}
 
-		switch commandString {
+		switch header.command {
 		case "GetWork":
 			select {
 			case rootHintHeight, ok := <-mn.pushWorkChan:
+				// There will never be a rootHintHeight at 0
+				if rootHintHeight == 0 {
+					break out
+				}
 				if ok {
+					cmd := "Work"
+					var command [CommandSize]byte
+					copy(command[:], []byte(cmd))
+
+					// Create header for the message.
+					hdr := remoteWorkerMsgHeader{}
+					hdr.magic = MagicBytes
+					hdr.command = cmd
+
+					hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
+					buf := make([]byte, 4)
+
+					binary.BigEndian.PutUint32(buf, hdr.magic)
+					hw.Write(buf)
+					hw.Write(command[:])
+
 					serialized := make([]byte, 4)
 					binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
-					conn.Write(serialized)
-					rootInProcess = rootHintHeight
+					hdr.length = uint32(len(serialized))
+
+					binary.BigEndian.PutUint32(buf, hdr.length)
+					hw.Write(buf)
+
+					hw.Write(serialized)
+
+					conn.Write(hw.Bytes())
+					rootInProcess[rootHintHeight] = struct{}{}
 				} else {
 					break out
 				}
@@ -219,21 +286,24 @@ out:
 			if bytes.Equal(verification, []byte{0x01}) {
 				valid = true
 			}
-			rootInProcess = -1
 
 			height := binary.BigEndian.Uint32(payload[1:])
 			mn.rangeProcessed <- &processedURootHint{
 				Validated:       valid,
 				URootHintHeight: int32(height),
 			}
+			delete(rootInProcess, int32(height))
 		default:
-			btcdLog.Errorf("remoteWorkerHandler got an unknown message command of %s from remote worker", commandString)
+			btcdLog.Errorf("remoteWorkerHandler got an unknown message command of %s from remote worker", header.command)
 		}
 
 	}
 
-	if rootInProcess != -1 {
-		mn.UtreexoRootHints = append(mn.UtreexoRootHints, rootInProcess)
+	if len(rootInProcess) > 0 {
+		for rootHeight, _ := range rootInProcess {
+			mn.UtreexoRootHints = append(mn.UtreexoRootHints, rootHeight)
+		}
+		mn.refresh <- struct{}{}
 	}
 
 	err := conn.Close()
@@ -271,16 +341,16 @@ out:
 		// channel.
 		var validateChan chan int32
 		var uRootHintHeight int32
-		if len(mn.UtreexoRootHints) < allRoots {
+		if len(mn.UtreexoRootHints) > 0 { // < allRoots {
 			validateChan = mn.pushWorkChan
 
-			// pop from the queue
+			// grab from the queue
 			uRootHintHeight = mn.UtreexoRootHints[len(mn.UtreexoRootHints)-1]
-			mn.UtreexoRootHints = mn.UtreexoRootHints[:len(mn.UtreexoRootHints)-1]
-			//uRootHintHeight = mn.UtreexoRootHints[currentRoot].Height
 		}
 		select {
 		case validateChan <- uRootHintHeight:
+			// pop from the queue
+			mn.UtreexoRootHints = mn.UtreexoRootHints[:len(mn.UtreexoRootHints)-1]
 			btcdLog.Infof("Queuing root at height %v", uRootHintHeight)
 			//currentRoot++
 		case processed := <-mn.rangeProcessed:
@@ -295,6 +365,9 @@ out:
 					processed.URootHintHeight)
 				panic(str)
 			}
+		// reset if we have rootHints that are queued up again
+		case <-mn.refresh:
+			break
 		case <-mn.quit:
 			break out
 		}
@@ -337,6 +410,7 @@ type RemoteWorker struct {
 
 	// Below are used to communicate with the main node.
 	coordCon       net.Conn
+	workChan       chan int32
 	getWorkChan    chan int32
 	rangeProcessed chan *processedURootHint
 
@@ -351,6 +425,7 @@ func NewRemoteWorker(num int8) *RemoteWorker {
 		num:         num,
 		quit:        make(chan struct{}),
 		getWorkChan: make(chan int32, 1),
+		workChan:    make(chan int32, 1),
 		valChan:     make(chan bool, 1),
 	}
 	return &rwrk
@@ -359,7 +434,6 @@ func NewRemoteWorker(num int8) *RemoteWorker {
 func (rwrk *RemoteWorker) GetWork() {
 	// If we have this channel, we can have a blocking read
 	// while also listening for the quit signal
-	workChan := make(chan int32)
 	go func() {
 		cmd := "GetWork"
 		var command [CommandSize]byte
@@ -383,15 +457,12 @@ func (rwrk *RemoteWorker) GetWork() {
 		fmt.Println("WRITE GETWORK")
 		// Tell the main node we're ready
 		rwrk.coordCon.Write(hw.Bytes())
-
-		// grab the height from the main node
-		rwrk.coordCon.Read(buf)
-		height := int32(binary.BigEndian.Uint32(buf))
-		workChan <- height
+		//height := int32(binary.BigEndian.Uint32(buf))
+		//workChan <- height
 	}()
 
 	select {
-	case height := <-workChan:
+	case height := <-rwrk.workChan:
 		rwrk.getWorkChan <- height
 		break
 	case <-rwrk.quit:
@@ -503,9 +574,49 @@ func (rwrk *RemoteWorker) WaitForShutdown() {
 	return
 }
 
+func (rwrk *RemoteWorker) listen() {
+funcout:
+	for {
+		rwhdr, err := readWorkerMsgHeader(rwrk.coordCon)
+		if err != nil {
+			if err == io.EOF {
+				btcdLog.Infof("workHandler read EOF while reading header. Disconnecting mainnode")
+				rwrk.quit <- struct{}{}
+				break funcout
+			}
+			btcdLog.Errorf("workHandler errored while reading header. err: %s", err)
+			continue
+		}
+
+		switch rwhdr.command {
+		case "Work":
+			heightBuf := make([]byte, rwhdr.length)
+			_, err := io.ReadFull(rwrk.coordCon, heightBuf)
+			if err != nil {
+				if err == io.EOF {
+					btcdLog.Infof("workHandler read EOF while reading Work msg. Disconnecting mainnode")
+					rwrk.quit <- struct{}{}
+					break funcout
+				}
+				btcdLog.Errorf("workHandler errored while reading Work msg. err: %s", err)
+				panic(err)
+			}
+			height := binary.BigEndian.Uint32(heightBuf[:])
+			rwrk.workChan <- int32(height)
+		case "Done":
+			rwrk.quit <- struct{}{}
+		default:
+			btcdLog.Errorf("workHandler got an unknown message command of %s from the mainnode", rwhdr.command)
+
+		}
+	}
+}
+
 // workHandler is the main workhorse for recieving utreexo roots to verify. workHandler
 // must be called as a goroutine.
 func (rwrk *RemoteWorker) workHandler() {
+	// listen for messages from the coordinator
+	go rwrk.listen()
 out:
 	for {
 		// If we're in the process of verifying something, block here and don't
