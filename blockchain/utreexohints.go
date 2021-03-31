@@ -24,6 +24,26 @@ func (b *BlockChain) FindRootHintByHeight(height int32) *chaincfg.UtreexoRootHin
 	return rootHint
 }
 
+// FindFirstRootHint returns the last rootHint that is in the set.
+func (b *BlockChain) FindFirstRootHint() *chaincfg.UtreexoRootHint {
+	roots := b.UtreexoRootHints()
+	if len(roots) == 0 {
+		return nil
+	}
+
+	return &roots[0]
+}
+
+// FindLastRootHint returns the last rootHint that is in the set.
+func (b *BlockChain) FindLastRootHint() *chaincfg.UtreexoRootHint {
+	roots := b.UtreexoRootHints()
+	if len(roots) == 0 {
+		return nil
+	}
+
+	return &roots[len(roots)-1]
+}
+
 // findNextUtreexoRootHint returns the next Utreexo root hint
 func (b *BlockChain) findNextUtreexoRootHint(height int32) *chaincfg.UtreexoRootHint {
 	roots := b.UtreexoRootHints()
@@ -49,8 +69,8 @@ func (b *BlockChain) findNextUtreexoRootHint(height int32) *chaincfg.UtreexoRoot
 	return nextRoot
 }
 
-// findPreviousUtreexoRootHint returns the previous Utreexo root hint
-func (b *BlockChain) findPreviousUtreexoRootHint(height int32) *chaincfg.UtreexoRootHint {
+// FindPreviousUtreexoRootHint returns the previous Utreexo root hint
+func (b *BlockChain) FindPreviousUtreexoRootHint(height int32) *chaincfg.UtreexoRootHint {
 	roots := b.UtreexoRootHints()
 	if len(roots) == 0 {
 		return nil

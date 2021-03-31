@@ -71,6 +71,18 @@ func rootMainNodeStart(interrupt <-chan struct{}) error {
 	mainNode.Start()
 
 	defer func() {
+		// Write mem profile if requested.
+		if cfg.MemProfile != "" {
+			memf, err := os.Create(cfg.MemProfile)
+			if err != nil {
+				fmt.Println(err)
+				btcdLog.Errorf("Unable to create mem profile: %v", err)
+				return
+			}
+			pprof.WriteHeapProfile(memf)
+			memf.Close()
+		}
+
 		btcdLog.Infof("Gracefully shutting down the nodes...")
 		mainNode.Stop()
 		srvrLog.Infof("Server shutdown complete")
@@ -109,7 +121,7 @@ func rootWorkerStart(interrupt <-chan struct{}) error {
 		defer pprof.StopCPUProfile()
 	}
 
-	for i := int8(0); i < int8(runtime.NumCPU()); i++ {
+	for i := int8(0); i < int8(cfg.NumWorkers); i++ {
 		workerNode := NewRemoteWorker(i)
 		workerNode.Start()
 	}
@@ -117,6 +129,21 @@ func rootWorkerStart(interrupt <-chan struct{}) error {
 	<-interrupt
 
 	fmt.Println("RETURN rootWorkerStart")
+
+	defer func() {
+		// Write mem profile if requested.
+		if cfg.MemProfile != "" {
+			memf, err := os.Create(cfg.MemProfile)
+			if err != nil {
+				fmt.Println(err)
+				btcdLog.Errorf("Unable to create mem profile: %v", err)
+				return
+			}
+			pprof.WriteHeapProfile(memf)
+			memf.Close()
+		}
+	}()
+
 	return nil
 }
 
@@ -260,6 +287,19 @@ func btcdMain(serverChan chan<- *server) error {
 
 	}
 	defer func() {
+		// Write mem profile if requested.
+		if cfg.MemProfile != "" {
+			memf, err := os.Create(cfg.MemProfile)
+			if err != nil {
+				fmt.Println(err)
+				btcdLog.Errorf("Unable to create mem profile: %v", err)
+				return
+			}
+			pprof.WriteHeapProfile(memf)
+			memf.Close()
+		}
+	}()
+	defer func() {
 		btcdLog.Infof("Gracefully shutting down the server...")
 		server.Stop()
 		server.WaitForShutdown()
@@ -268,7 +308,7 @@ func btcdMain(serverChan chan<- *server) error {
 
 	if cfg.UtreexoRootVerifyHeight > 0 {
 		verifyChan := make(chan bool)
-		server.StartUtreexoRootHintVerify(server.chain.UtreexoRootBeingVerified(), verifyChan)
+		server.StartUtreexoRootHintVerify(verifyChan)
 
 		verified := <-verifyChan
 		if verified {
@@ -490,9 +530,4 @@ func main() {
 		trace.Stop()
 		os.Exit(1)
 	}
-	//trace.Stop()
-	//runtime.GC()
-	memf, _ := os.Create("memprof")
-	pprof.WriteHeapProfile(memf)
-	defer memf.Close()
 }

@@ -116,6 +116,7 @@ type config struct {
 	ConfigFile              string        `short:"C" long:"configfile" description:"Path to configuration file"`
 	ConnectPeers            []string      `long:"connect" description:"Connect only to the specified peers at startup"`
 	CPUProfile              string        `long:"cpuprofile" description:"Write CPU profile to the specified file"`
+	MemProfile              string        `long:"memprofile" description:"Write memory profile to the specified file"`
 	DataDir                 string        `short:"b" long:"datadir" description:"Directory to store data"`
 	DbType                  string        `long:"dbtype" description:"Database backend to use for the Block Chain"`
 	DebugLevel              string        `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
@@ -174,6 +175,7 @@ type config struct {
 	UtreexoRootVerifyHeight int           `long:"utreexorootverifyheight" description:"The height of the utreexo root to checkfor"`
 	UtreexoMainNode         bool          `long:"utreexomain" description:"Enable the ability to have remote workers for UtreexoRootVerifyMode"`
 	UtreexoWorker           bool          `long:"utreexoworker" description:"Make this node a worker for a UtreexoMainNode"`
+	NumWorkers              int           `long:"numworkers" description:"How many workers to have for a UtreexoMainNode"`
 	MainNodeIP              string        `long:"mainnodeip" description:"IP to connect to for a UtreexoWorker"`
 	TorIsolation            bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
 	TrickleInterval         time.Duration `long:"trickleinterval" description:"Minimum time between attempts to send new inventory to a connected peer"`

@@ -881,6 +881,27 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 	return b.utxoCache.Flush(FlushIfNeeded, state)
 }
 
+// connectUBlockParallel handles connecting the passed ublock to the end of the main
+// (best) chain.
+func (b *BlockChain) connectUBlockParallel(node *blockNode, ublock *btcutil.UBlock) error {
+	// No warnings about unknown rules until the chain is current.
+	if b.isCurrent() {
+		// Warn if any unknown new rules are either about to activate or
+		// have already been activated.
+		if err := b.warnUnknownRuleActivations(node); err != nil {
+			return err
+		}
+	}
+
+	// Notify the caller that the block was connected to the main chain.
+	// The caller would typically want to react with actions such as
+	// updating wallets.
+	//b.chainLock.Unlock()
+	b.sendNotification(NTBlockConnected, ublock)
+	//b.chainLock.Lock()
+	return nil
+}
+
 // connectUBlock handles connecting the passed ublock to the end of the main
 // (best) chain.
 //
@@ -1499,6 +1520,70 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 	}
 
 	return err == nil, err
+}
+
+// connectBestChainParallel handles connecting the passed ublock to the chain while
+// respecting proper chain selection according to the chain with the most
+// proof of work.
+//
+// The flags modify the behavior of this function as follows:
+//  - BFFastAdd: Avoids several expensive transaction validation operations.
+//    This is useful when using checkpoints.
+func (b *BlockChain) connectBestChainParallel(node *blockNode, ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
+	fastAdd := flags&BFFastAdd == BFFastAdd
+
+	// Perform several checks to verify the block can be connected
+	// to the main chain without violating any rules and without
+	// actually connecting the block.
+	view := NewUtxoViewpoint()
+	if !fastAdd {
+		err := b.checkConnectUBlock(node, ublock, view)
+		if err == nil {
+			b.index.SetStatusFlags(node, statusValid)
+		} else if _, ok := err.(RuleError); ok {
+			b.index.SetStatusFlags(node, statusValidateFailed)
+		} else {
+			return false, err
+		}
+
+		if err != nil {
+			return false, err
+		}
+	}
+
+	// In the fast add case the code to check the block connection
+	// was skipped, so the utxo view needs to load the referenced
+	// utxos, spend them, and add the new utxos being created by
+	// this block.
+	if fastAdd {
+		// Check that the ublock txOuts are valid
+		err := b.utreexoViewpoint.Modify(ublock)
+		if err != nil {
+			return false, err
+		}
+
+		view.UBlockToUtxoView(*ublock)
+	}
+
+	// Connect the block to the main chain.
+	err := b.connectUBlockParallel(node, ublock)
+	if err != nil {
+		parentHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+		// If we don't extend the best chain, then just error out
+		err := fmt.Errorf("The block %v does not extend the chain with parentHash of %v",
+			ublock.Hash().String(), parentHash.String())
+
+		return false, err
+	}
+
+	// If this is fast add, or this block node isn't yet marked as
+	// valid, then we'll update its status and flush the state to
+	// disk again.
+	if fastAdd || !b.index.NodeStatus(node).KnownValid() {
+		b.index.SetStatusFlags(node, statusValid)
+	}
+
+	return true, nil
 }
 
 // connectBestChainUBlock handles connecting the passed ublock to the chain while

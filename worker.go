@@ -8,14 +8,17 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
+	"container/list"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/netsync"
+	"github.com/btcsuite/btcd/wire"
 )
 
 const (
@@ -30,80 +33,31 @@ type processedURootHint struct {
 	URootHintHeight int32
 }
 
-type workerChan struct {
-	num         int32
-	getWorkChan chan int32
+type work struct {
+	uRootHintHeight int32
+	//startHeaders    *startHeaders
 }
 
-type remoteWorkerMsgHeader struct {
-	magic   uint32 // 4 bytes
-	command string // 12 bytes
-	length  uint32 // 4 bytes
+type result struct {
+	uRootHintHeight int32
+	valid           [1]byte
 }
 
-func readWorkerMsgHeader(reader io.Reader) (*remoteWorkerMsgHeader, error) {
-	rwhdr := &remoteWorkerMsgHeader{}
-
-	headerBuf := make([]byte, HeaderSize)
-	_, err := io.ReadFull(reader, headerBuf)
-	if err != nil {
-		return nil, err
-	}
-
-	rwhdr.magic = binary.BigEndian.Uint32(headerBuf[:4])
-	if rwhdr.magic != MagicBytes {
-		err = fmt.Errorf("readMsgHeader read wrong magic bytes of "+"%v",
-			rwhdr.magic)
-		return nil, err
-	}
-
-	// Read command.
-	commandBuf := make([]byte, CommandSize)
-	copy(commandBuf, headerBuf[4:4+12])
-	// Strip trailing zeros from command string.
-	rwhdr.command = string(bytes.TrimRight(commandBuf, "\x00"))
-
-	rwhdr.length = binary.BigEndian.Uint32(headerBuf[16 : 16+4])
-
-	return rwhdr, nil
+type startHeaders struct {
+	lastHeight int32
+	headers    []*wire.BlockHeader
+	hashes     []chainhash.Hash
 }
-
-//func writeWorkerMsg(writer io.Writer, cmd string) {
-//	var command [CommandSize]byte
-//	copy(command[:], []byte(cmd))
-//
-//	// Create header for the message.
-//	hdr := remoteWorkerMsgHeader{}
-//	hdr.magic = MagicBytes
-//	hdr.command = cmd
-//
-//	hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
-//	buf := make([]byte, 4)
-//
-//	binary.BigEndian.PutUint32(buf, hdr.magic)
-//	hw.Write(buf)
-//	hw.Write(command[:])
-//
-//	serialized := make([]byte, 4)
-//	binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
-//	hdr.length = uint32(len(serialized))
-//
-//	binary.BigEndian.PutUint32(buf, hdr.length)
-//	hw.Write(buf)
-//
-//	hw.Write(serialized)
-//
-//	conn.Write(hw.Bytes())
-//}
 
 // MainNode is the main node for doing the initial block download. MainNode hands
 // off work to other nodes if they are available.
 type MainNode struct {
-	started  int32
-	shutdown int32
-	wg       sync.WaitGroup
-	quit     chan struct{}
-	refresh  chan struct{}
+	started       int32
+	shutdown      int32
+	wg            sync.WaitGroup
+	quit          chan struct{}
+	refresh       chan struct{}
+	gotAllHeaders chan struct{}
 
 	// numWorkers is the amount of workers that are available to perform
 	// the initial block download.
@@ -112,14 +66,17 @@ type MainNode struct {
 	// all the available workers
 	workers []*LocalWorker
 
+	// server is the underlying btcd server
+	server       *server
+	startHeaders *startHeaders
+
 	// The UtreexoRootHints that this MainNode must verify to complete
 	// the initial block download.
 	UtreexoRootHints []int32
-	//UtreexoRootHints []chaincfg.UtreexoRootHint
 
 	// Below are used to communicate with the workers.
 	rangeProcessed chan *processedURootHint
-	pushWorkChan   chan int32
+	pushWorkChan   chan *work
 }
 
 // initializes the UtreexoRootHintsToVerify
@@ -128,8 +85,10 @@ func initUtreexoRootHintsToVerify(chainParams *chaincfg.Params) []int32 {
 	rootHints := make([]int32, 0,
 		len(chainParams.UtreexoRootHints))
 
-	for _, rootHint := range chainParams.UtreexoRootHints {
-		rootHints = append(rootHints, rootHint.Height)
+	for i := len(chainParams.UtreexoRootHints) - 1; i >= 0; i-- {
+		rootHints = append(rootHints, chainParams.UtreexoRootHints[i].Height)
+		//for _, rootHint := range chainParams.UtreexoRootHints {
+		//rootHints = append(rootHints, rootHint.Height)
 	}
 
 	return rootHints
@@ -138,13 +97,25 @@ func initUtreexoRootHintsToVerify(chainParams *chaincfg.Params) []int32 {
 // initMainNode initializes a new MainNode
 func initMainNode(chainParams *chaincfg.Params, numWorkers int32) (*MainNode, error) {
 	mn := MainNode{
-		quit:       make(chan struct{}),
-		refresh:    make(chan struct{}),
-		numWorkers: numWorkers,
+		quit:          make(chan struct{}),
+		refresh:       make(chan struct{}),
+		gotAllHeaders: make(chan struct{}),
+		numWorkers:    numWorkers,
 	}
 	mn.UtreexoRootHints = initUtreexoRootHintsToVerify(chainParams)
-	mn.pushWorkChan = make(chan int32)
+	mn.pushWorkChan = make(chan *work)
 	mn.rangeProcessed = make(chan *processedURootHint, len(mn.UtreexoRootHints))
+
+	//mn.server = newServer()
+
+	interrupt := make(chan struct{}) // something for newServer func compat
+	var err error
+	mn.server, err = newServer(cfg.Listeners, cfg.AgentBlacklist,
+		cfg.AgentWhitelist, nil, activeNetParams.Params, interrupt)
+	if err != nil {
+		btcdLog.Errorf("Unable to create server for the main node: %v", err)
+		return nil, err
+	}
 
 	return &mn, nil
 }
@@ -183,7 +154,7 @@ func (mn *MainNode) listenForResults() {
 
 func (mn *MainNode) listenForRemoteWorkers() {
 	var workerCount int
-	listenAdr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:5555")
+	listenAdr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:18330")
 	if err != nil {
 		btcdLog.Warnf("Couldn't resolve TCP addr err: %s", err)
 	}
@@ -205,6 +176,37 @@ func (mn *MainNode) listenForRemoteWorkers() {
 	}
 }
 
+func (mn *MainNode) buildStartHeaders(uRootHint *chaincfg.UtreexoRootHint) error {
+	var headers startHeaders
+	msgHeaders := make([]*wire.BlockHeader, uRootHint.Height)
+	blockHashes := make([]chainhash.Hash, uRootHint.Height)
+
+	curHash := *uRootHint.Hash
+	for i := uRootHint.Height - 1; i >= 0; i-- {
+		newHeader, err := mn.server.chain.HeaderByHash(&curHash)
+		if err != nil {
+			return err
+		}
+
+		msgHeaders[i] = &newHeader
+		blockHashes[i] = curHash
+		curHash = newHeader.PrevBlock
+	}
+	fmt.Println("curHash", curHash.String())
+
+	headers.headers = msgHeaders
+	headers.hashes = blockHashes
+	headers.lastHeight = uRootHint.Height
+
+	mn.startHeaders = &headers
+
+	return nil
+}
+
+func (mn *MainNode) grabStartHeaders() (*startHeaders, error) {
+	return mn.startHeaders, nil
+}
+
 // remoteWorkerHandler is a function that listens for remote workers and writes
 // a Utreexo root hint to be validated. This function behaves as a "worker" in that
 // it'll listen to the mn.pushWorkChan/mn.rangeProcessed channels and take/push
@@ -212,89 +214,65 @@ func (mn *MainNode) listenForRemoteWorkers() {
 //
 // This function MUST be ran as a goroutine
 func (mn *MainNode) remoteWorkerHandler(conn net.Conn) {
+	// block until we have all the headers
+	select {
+	case <-mn.gotAllHeaders:
+		break
+	case <-mn.quit:
+		return
+	}
 	rootInProcess := make(map[int32]struct{})
 out:
 	for {
 		// Listen to workers
-		header, err := readWorkerMsgHeader(conn)
+		rmsg, _, err := ReadWorkerMessage(conn)
 		if err != nil {
-			if err == io.EOF {
-				btcdLog.Infof("remoteWorkerHandler read EOF while reading header. Disconnecting remote worker")
-				break out
-			}
-			btcdLog.Errorf("remoteWorkerHandler errored while reading header. err: %s", err)
-			panic(err)
+			btcdLog.Infof("remoteWorkerHandler errored out while reading message. Disconnecting remote worker. err: %s", err)
+			break out
 		}
 
-		// Read payload.
-		payload := make([]byte, header.length)
-		_, err = io.ReadFull(conn, payload)
-		if err != nil {
-			if err == io.EOF {
-				btcdLog.Infof("remoteWorkerHandler read EOF while reading payload. Disconnecting remote worker")
-				break out
+		switch msg := rmsg.(type) {
+		case *MsgGetStartHeaders:
+			headers, err := mn.grabStartHeaders()
+			if err != nil {
+				panic(err)
 			}
-			btcdLog.Errorf("remoteWorkerHandler errored while reading payload. err: %s", err)
-			panic(err)
-		}
 
-		switch header.command {
-		case "GetWork":
+			msgStartHeaders := MsgStartHeaders{
+				headers,
+			}
+			WriteWorkerMessage(conn, &msgStartHeaders)
+
+		case *MsgGetWork:
 			select {
-			case rootHintHeight, ok := <-mn.pushWorkChan:
-				// There will never be a rootHintHeight at 0
-				if rootHintHeight == 0 {
-					break out
-				}
+			case work, ok := <-mn.pushWorkChan:
 				if ok {
-					cmd := "Work"
-					var command [CommandSize]byte
-					copy(command[:], []byte(cmd))
-
-					// Create header for the message.
-					hdr := remoteWorkerMsgHeader{}
-					hdr.magic = MagicBytes
-					hdr.command = cmd
-
-					hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
-					buf := make([]byte, 4)
-
-					binary.BigEndian.PutUint32(buf, hdr.magic)
-					hw.Write(buf)
-					hw.Write(command[:])
-
-					serialized := make([]byte, 4)
-					binary.BigEndian.PutUint32(serialized, uint32(rootHintHeight))
-					hdr.length = uint32(len(serialized))
-
-					binary.BigEndian.PutUint32(buf, hdr.length)
-					hw.Write(buf)
-
-					hw.Write(serialized)
-
-					conn.Write(hw.Bytes())
-					rootInProcess[rootHintHeight] = struct{}{}
+					msgWork := MsgWork{
+						work,
+					}
+					WriteWorkerMessage(conn, &msgWork)
+					rootInProcess[work.uRootHintHeight] = struct{}{}
 				} else {
 					break out
 				}
 			case <-mn.quit:
 				break out
 			}
-		case "Results":
-			verification := payload[:1]
+		case *MsgResult:
+			verification := msg.result.valid[:] //payload[:1]
 			var valid bool
 			if bytes.Equal(verification, []byte{0x01}) {
 				valid = true
 			}
 
-			height := binary.BigEndian.Uint32(payload[1:])
+			height := msg.result.uRootHintHeight
 			mn.rangeProcessed <- &processedURootHint{
 				Validated:       valid,
 				URootHintHeight: int32(height),
 			}
 			delete(rootInProcess, int32(height))
 		default:
-			btcdLog.Errorf("remoteWorkerHandler got an unknown message command of %s from remote worker", header.command)
+			btcdLog.Errorf("remoteWorkerHandler got an unknown message command of %s from remote worker", msg.Command())
 		}
 
 	}
@@ -309,6 +287,29 @@ out:
 	err := conn.Close()
 	if err != nil {
 		btcdLog.Errorf("remoteWorkerHandler connection close err: %s", err)
+	}
+}
+
+// getHeaders does the initial header download to save time for the workers
+func (mn *MainNode) getHeaders() {
+	lastRootHint := mn.server.chain.FindLastRootHint()
+	done := make(chan struct{})
+	mn.server.StartHeadersDownload(lastRootHint, done)
+
+	btcdLog.Infof("Downloading and verifying headers to last utreexo"+
+		"root hint height of %v", lastRootHint.Height)
+
+	select {
+	case <-done:
+		err := mn.buildStartHeaders(mn.server.chain.FindLastRootHint())
+		if err != nil {
+			panic(err)
+		}
+		btcdLog.Infof("Headers all downloaded")
+		close(mn.gotAllHeaders)
+		break
+	case <-mn.quit:
+		break
 	}
 }
 
@@ -327,11 +328,15 @@ func (mn *MainNode) workHandler() {
 		nw.Start()
 	}
 
+	// Start the remote worker handler. This handles the network connections to
+	// communicate with remote workers.
 	go mn.listenForRemoteWorkers()
+
+	// first get all the headers to the last rootHint height
+	mn.getHeaders()
 
 	// Queue all the rootHints to be validated
 	allRoots := len(mn.UtreexoRootHints)
-	//currentRoot := 0
 	processedRoots := 0
 
 out:
@@ -339,24 +344,24 @@ out:
 		// Only send items while there are still items that need to
 		// be processed.  The select statement will never select a nil
 		// channel.
-		var validateChan chan int32
-		var uRootHintHeight int32
-		if len(mn.UtreexoRootHints) > 0 { // < allRoots {
+		var validateChan chan *work
+		workToQueue := work{}
+		if len(mn.UtreexoRootHints) > 0 {
 			validateChan = mn.pushWorkChan
 
 			// grab from the queue
-			uRootHintHeight = mn.UtreexoRootHints[len(mn.UtreexoRootHints)-1]
+			height := mn.UtreexoRootHints[len(mn.UtreexoRootHints)-1]
+			workToQueue.uRootHintHeight = height
 		}
+
 		select {
-		case validateChan <- uRootHintHeight:
+		case validateChan <- &workToQueue:
 			// pop from the queue
 			mn.UtreexoRootHints = mn.UtreexoRootHints[:len(mn.UtreexoRootHints)-1]
-			btcdLog.Infof("Queuing root at height %v", uRootHintHeight)
-			//currentRoot++
+			btcdLog.Infof("Queuing root at height %v", workToQueue.uRootHintHeight)
 		case processed := <-mn.rangeProcessed:
 			btcdLog.Infof("Processed root at height:%v", processed.URootHintHeight)
 			processedRoots++
-			//uRootHintHeight = mn.UtreexoRootHints[currentRoot].Height
 			if !processed.Validated {
 				// If a root is wrong, panic. The binary is incorrect
 				// and there's no way of recovering from this.
@@ -382,7 +387,6 @@ out:
 	}
 
 	mn.wg.Done()
-	btcdLog.Trace("work handler done")
 	btcdLog.Infof("Main node work handler done")
 }
 
@@ -397,21 +401,30 @@ type Worker interface {
 	PushResults(*processedURootHint)
 }
 
+type headerState struct {
+	index      *blockchain.SharedBlockIndex
+	headers    []*wire.BlockHeader
+	hashes     []chainhash.Hash
+	headerList *list.List
+}
+
 type RemoteWorker struct {
-	num       int8
-	started   int32
-	shutdown  int32
-	verifying int32
-	wg        sync.WaitGroup
-	quit      chan struct{}
+	num        int8
+	started    int32
+	shutdown   int32
+	verifying  int32
+	wg         sync.WaitGroup
+	quit       chan struct{}
+	headersSet chan struct{}
 
 	// server is the underlying btcd server.
-	server *server
+	server      *server
+	headerState *headerState
 
 	// Below are used to communicate with the main node.
 	coordCon       net.Conn
-	workChan       chan int32
-	getWorkChan    chan int32
+	workChan       chan *work
+	getWorkChan    chan *work
 	rangeProcessed chan *processedURootHint
 
 	// Below are used to listen for the worker's server to finish verifying the
@@ -424,8 +437,9 @@ func NewRemoteWorker(num int8) *RemoteWorker {
 	rwrk := RemoteWorker{
 		num:         num,
 		quit:        make(chan struct{}),
-		getWorkChan: make(chan int32, 1),
-		workChan:    make(chan int32, 1),
+		headersSet:  make(chan struct{}),
+		getWorkChan: make(chan *work, 1),
+		workChan:    make(chan *work, 1),
 		valChan:     make(chan bool, 1),
 	}
 	return &rwrk
@@ -435,35 +449,19 @@ func (rwrk *RemoteWorker) GetWork() {
 	// If we have this channel, we can have a blocking read
 	// while also listening for the quit signal
 	go func() {
-		cmd := "GetWork"
-		var command [CommandSize]byte
-		copy(command[:], []byte(cmd))
-
-		// Create header for the message.
-		hdr := remoteWorkerMsgHeader{}
-		hdr.magic = MagicBytes
-		hdr.command = cmd
-
-		hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
-		buf := make([]byte, 4)
-
-		binary.BigEndian.PutUint32(buf, hdr.magic)
-		hw.Write(buf)
-		hw.Write(command[:])
-
-		binary.BigEndian.PutUint32(buf, hdr.length)
-		hw.Write(buf)
-
-		fmt.Println("WRITE GETWORK")
-		// Tell the main node we're ready
-		rwrk.coordCon.Write(hw.Bytes())
-		//height := int32(binary.BigEndian.Uint32(buf))
-		//workChan <- height
+		msg, err := makeEmptyMessage(CmdGetWork)
+		if err != nil {
+			panic(err)
+		}
+		err = WriteWorkerMessage(rwrk.coordCon, msg)
+		if err != nil {
+			panic(err)
+		}
 	}()
 
 	select {
-	case height := <-rwrk.workChan:
-		rwrk.getWorkChan <- height
+	case work := <-rwrk.workChan:
+		rwrk.getWorkChan <- work
 		break
 	case <-rwrk.quit:
 		break
@@ -471,67 +469,20 @@ func (rwrk *RemoteWorker) GetWork() {
 }
 
 func (rwrk *RemoteWorker) PushResults(p *processedURootHint) {
-	cmd := "Results"
-	var command [CommandSize]byte
-	copy(command[:], []byte(cmd))
-
-	// Create header for the message.
-	hdr := remoteWorkerMsgHeader{}
-	hdr.magic = MagicBytes
-	hdr.command = cmd
-
-	var bw bytes.Buffer
+	res := result{
+		uRootHintHeight: p.URootHintHeight,
+	}
 	if p.Validated {
-		//rwrk.coordCon.Write([]byte{0x01})
-		bw.Write([]byte{0x01})
+		res.valid = [1]byte{0x01}
 	} else {
-		//rwrk.coordCon.Write([]byte{0x00})
-		bw.Write([]byte{0x00})
+		res.valid = [1]byte{0x00}
 	}
 
-	//_ = binary.Write(rwrk.coordCon, binary.BigEndian, p.URootHintHeight)
-	_ = binary.Write(&bw, binary.BigEndian, p.URootHintHeight)
-	payload := bw.Bytes()
-	hdr.length = uint32(len(payload))
+	msgResult := MsgResult{}
+	msgResult.result = &res
 
-	hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
-	buf := make([]byte, 4)
-
-	binary.BigEndian.PutUint32(buf, hdr.magic)
-	hw.Write(buf)
-	hw.Write(command[:])
-
-	binary.BigEndian.PutUint32(buf, hdr.length)
-	hw.Write(buf)
-
-	rwrk.coordCon.Write(hw.Bytes())
-	rwrk.coordCon.Write(payload)
+	WriteWorkerMessage(rwrk.coordCon, &msgResult)
 }
-
-//func (rwrk *RemoteWorker) pushDone() {
-//	cmd := "Done"
-//	var command [CommandSize]byte
-//	copy(command[:], []byte(cmd))
-//
-//	// Create header for the message.
-//	hdr := remoteWorkerMsgHeader{}
-//	hdr.magic = MagicBytes
-//	hdr.command = cmd
-//
-//	hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
-//	buf := make([]byte, 4)
-//
-//	binary.BigEndian.PutUint32(buf, hdr.magic)
-//	hw.Write(buf)
-//	hw.Write(command[:])
-//
-//	binary.BigEndian.PutUint32(buf, hdr.length)
-//	hw.Write(buf)
-//
-//	fmt.Println("WRITE DONE")
-//	// Tell the main node we're done
-//	rwrk.coordCon.Write(hw.Bytes())
-//}
 
 func (rwrk *RemoteWorker) Start() {
 	// Already started?
@@ -539,10 +490,9 @@ func (rwrk *RemoteWorker) Start() {
 		return
 	}
 
-	btcdLog.Trace("Starting utreexo remote worker")
 	btcdLog.Infof("Starting utreexo remote worker")
 
-	dialAddr, err := net.ResolveTCPAddr("tcp", cfg.MainNodeIP+":5555")
+	dialAddr, err := net.ResolveTCPAddr("tcp", cfg.MainNodeIP+":18330")
 	if err != nil {
 		btcdLog.Errorf("Couldn't resolve TCP addr err: %s", err)
 	}
@@ -574,39 +524,63 @@ func (rwrk *RemoteWorker) WaitForShutdown() {
 	return
 }
 
+func (rwrk *RemoteWorker) setHeaders(msg *MsgStartHeaders) error {
+	index, err := blockchain.InitAndSetBIdx(msg.headers.headers[:], msg.headers.hashes[:], activeNetParams.Params)
+	if err != nil {
+		panic(err)
+	}
+	rwrk.headerState = &headerState{
+		index:   index,
+		headers: msg.headers.headers,
+		hashes:  msg.headers.hashes,
+	}
+	rwrk.headerState.headerList, err = createHeaderList(msg.headers.headers, msg.headers.hashes)
+	if err != nil {
+		panic(err)
+	}
+
+	rwrk.headersSet <- struct{}{}
+
+	return nil
+}
+
+func createHeaderList(headers []*wire.BlockHeader, hashes []chainhash.Hash) (*list.List, error) {
+	var height int32
+	headerList := list.New()
+
+	for i, _ := range headers {
+		height++
+		blockHash := hashes[i]
+
+		node := netsync.HeaderNode{Hash: &blockHash}
+		node.Height = height
+		headerList.PushBack(&node)
+	}
+
+	return headerList, nil
+}
+
 func (rwrk *RemoteWorker) listen() {
 funcout:
 	for {
-		rwhdr, err := readWorkerMsgHeader(rwrk.coordCon)
+		rmsg, _, err := ReadWorkerMessage(rwrk.coordCon)
 		if err != nil {
-			if err == io.EOF {
-				btcdLog.Infof("workHandler read EOF while reading header. Disconnecting mainnode")
-				rwrk.quit <- struct{}{}
-				break funcout
-			}
-			btcdLog.Errorf("workHandler errored while reading header. err: %s", err)
-			continue
+			btcdLog.Errorf("RemoteWorker listen errored while reading message err: %s", err)
+			break funcout
 		}
 
-		switch rwhdr.command {
-		case "Work":
-			heightBuf := make([]byte, rwhdr.length)
-			_, err := io.ReadFull(rwrk.coordCon, heightBuf)
-			if err != nil {
-				if err == io.EOF {
-					btcdLog.Infof("workHandler read EOF while reading Work msg. Disconnecting mainnode")
-					rwrk.quit <- struct{}{}
-					break funcout
-				}
-				btcdLog.Errorf("workHandler errored while reading Work msg. err: %s", err)
-				panic(err)
+		switch msg := rmsg.(type) {
+		case *MsgWork:
+			rwrk.workChan <- msg.work
+		case *MsgStartHeaders:
+			if rwrk.headerState == nil {
+				btcdLog.Infof("Received headers from mainnode")
+				rwrk.setHeaders(msg)
+			} else {
+				btcdLog.Warnf("Received unrequested headers from mainnode")
 			}
-			height := binary.BigEndian.Uint32(heightBuf[:])
-			rwrk.workChan <- int32(height)
-		case "Done":
-			rwrk.quit <- struct{}{}
 		default:
-			btcdLog.Errorf("workHandler got an unknown message command of %s from the mainnode", rwhdr.command)
+			btcdLog.Errorf("workHandler got an unknown message command of %s from the mainnode", rmsg.Command())
 
 		}
 	}
@@ -617,14 +591,44 @@ funcout:
 func (rwrk *RemoteWorker) workHandler() {
 	// listen for messages from the coordinator
 	go rwrk.listen()
+
+	// Get the entire headers first
+	msg, err := makeEmptyMessage(CmdGetStartHeaders)
+	if err != nil {
+		panic(err)
+	}
+	err = WriteWorkerMessage(rwrk.coordCon, msg)
+	if err != nil {
+		panic(err)
+	}
+
+	// Block until we have all the headers
+	select {
+	case <-rwrk.headersSet:
+	case <-rwrk.quit:
+		return
+	}
+
+	interrupt := make(chan struct{}) // something for newServer func compat
+	newServer, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
+		cfg.AgentWhitelist, nil, activeNetParams.Params, interrupt)
+	if err != nil {
+		btcdLog.Errorf("Unable to create server for the worker: %v", err)
+		return
+	}
+	rwrk.server = newServer
+	rwrk.server.syncManager.SetHeaderList(rwrk.headerState.headerList)
+	rwrk.server.StartUtreexoRootHintVerify(rwrk.valChan)
+	rwrk.server.chain.SetBlockIndex(rwrk.headerState.index)
 out:
 	for {
+
 		// If we're in the process of verifying something, block here and don't
 		// queue up for another rootHint
 		if rwrk.inProcessRootHint != nil {
 			select {
 			case verified := <-rwrk.valChan:
-				fmt.Println("verified", verified,
+				btcdLog.Infof("verified root at height %d",
 					rwrk.inProcessRootHint.Height)
 				// TODO push here
 				rwrk.PushResults(
@@ -633,11 +637,6 @@ out:
 						URootHintHeight: rwrk.inProcessRootHint.Height,
 					},
 				)
-
-				// shutdown server to free the memory
-				rwrk.server.Stop()
-				rwrk.server.WaitForShutdown()
-				rwrk.server = nil
 
 				// set inProcessRootHint to nil since we're not
 				// verifying anything anymore
@@ -648,39 +647,28 @@ out:
 		}
 
 		// We're not verifying anything at the moment so queue up for a rootHint
-		btcdLog.Infof("remote worker num %v queuing for work", rwrk.num)
+		btcdLog.Tracef("remote worker num %v queuing for work", rwrk.num)
 
 		rwrk.GetWork()
 		// TODO receive work here
 		select {
-		case uRootHintToVerifyHeight, ok := <-rwrk.getWorkChan:
+		case work, ok := <-rwrk.getWorkChan:
 			if ok {
-				btcdLog.Infof("Work received for rootHint height:%v for worker:%v",
-					uRootHintToVerifyHeight, rwrk.num)
+				btcdLog.Tracef("Work received for rootHint height:%v for worker:%v",
+					work, rwrk.num)
 
 				// if the channel is still open, go through the verification steps
-				interrupt := make(chan struct{}) // something for newServer func compat
-
-				newServer, err := newServer(cfg.Listeners, cfg.AgentBlacklist,
-					cfg.AgentWhitelist, nil, activeNetParams.Params, interrupt)
-				if err != nil {
-					btcdLog.Errorf("Unable to create server for the worker: %v", err)
-					return
-				}
-
-				rwrk.server = newServer
 
 				// Grab the rootHint for the provided height. If nil, then panic since the
 				// worker's rootHints are different from that of the main node
-				rwrk.inProcessRootHint = rwrk.server.chain.FindRootHintByHeight(uRootHintToVerifyHeight)
+				rwrk.inProcessRootHint = rwrk.server.chain.FindRootHintByHeight(work.uRootHintHeight)
 				if rwrk.inProcessRootHint == nil {
-					err = fmt.Errorf("Unable to find the Utreexo Root Hint for height: %v. Panicking...", uRootHintToVerifyHeight)
+					err = fmt.Errorf("Unable to find the Utreexo Root Hint for height: %v. Panicking...", work.uRootHintHeight)
 					btcdLog.Errorf("%s", err)
 					panic(err)
 				}
 
-				rwrk.server.StartUtreexoRootHintVerify(
-					rwrk.inProcessRootHint, rwrk.valChan)
+				rwrk.server.syncManager.QueueURootHint(rwrk.inProcessRootHint)
 			} else {
 				break out
 			}
@@ -695,7 +683,6 @@ out:
 	}
 
 	rwrk.wg.Done()
-	btcdLog.Trace("work handler done")
 	btcdLog.Infof("work handler done")
 }
 
@@ -711,8 +698,8 @@ type LocalWorker struct {
 	server *server
 
 	// Below are used to communicate with the main node.
-	coordChan      chan int32
-	getWorkChan    chan int32
+	coordChan      chan *work
+	getWorkChan    chan *work
 	rangeProcessed chan *processedURootHint
 
 	// Below are used to listen for the worker's server to finish verifying the
@@ -722,9 +709,9 @@ type LocalWorker struct {
 }
 
 func (wrk *LocalWorker) GetWork() {
-	height, ok := <-wrk.coordChan
+	work, ok := <-wrk.coordChan
 	if ok {
-		wrk.getWorkChan <- height
+		wrk.getWorkChan <- work
 	}
 }
 
@@ -732,13 +719,13 @@ func (wrk *LocalWorker) PushResults(result *processedURootHint) {
 	wrk.rangeProcessed <- result
 }
 
-func NewLocalWorker(coordChan chan int32, rangeProcessed chan *processedURootHint, num int32) *LocalWorker {
+func NewLocalWorker(coordChan chan *work, rangeProcessed chan *processedURootHint, num int32) *LocalWorker {
 	wrk := LocalWorker{
 		num:            num,
 		quit:           make(chan struct{}),
 		rangeProcessed: rangeProcessed,
 		coordChan:      coordChan,
-		getWorkChan:    make(chan int32, 1),
+		getWorkChan:    make(chan *work, 1),
 		valChan:        make(chan bool, 1),
 	}
 
@@ -751,7 +738,6 @@ func (wrk *LocalWorker) Start() {
 		return
 	}
 
-	btcdLog.Trace("Starting utreexo worker")
 	btcdLog.Infof("Starting utreexo worker")
 	wrk.wg.Add(1)
 	go wrk.workHandler()
@@ -796,10 +782,6 @@ out:
 						URootHintHeight: wrk.inProcessRootHint.Height,
 					},
 				)
-				//wrk.rangeProcessed <- &processedURootHint{
-				//	Validated: verified,
-				//	URootHint: wrk.inProcessRootHint,
-				//}
 
 				// shutdown server to free the memory
 				wrk.server.Stop()
@@ -823,10 +805,10 @@ out:
 		wrk.GetWork()
 		// TODO receive work here
 		select {
-		case uRootHintToVerifyHeight, ok := <-wrk.getWorkChan:
+		case uRootHintWork, ok := <-wrk.getWorkChan:
 			if ok {
 				btcdLog.Infof("Work received for rootHint height:%v for worker:%v",
-					uRootHintToVerifyHeight, wrk.num)
+					uRootHintWork.uRootHintHeight, wrk.num)
 
 				// if the channel is still open, go through the verification steps
 				interrupt := make(chan struct{}) // something for newServer func compat
@@ -843,15 +825,14 @@ out:
 
 				// Grab the rootHint for the provided height. If nil, then panic since the
 				// worker's rootHints are different from that of the main node
-				wrk.inProcessRootHint = wrk.server.chain.FindRootHintByHeight(uRootHintToVerifyHeight)
+				wrk.inProcessRootHint = wrk.server.chain.FindRootHintByHeight(uRootHintWork.uRootHintHeight)
 				if wrk.inProcessRootHint == nil {
-					err = fmt.Errorf("Unable to find the Utreexo Root Hint for height: %v. Panicking...", uRootHintToVerifyHeight)
+					err = fmt.Errorf("Unable to find the Utreexo Root Hint for height: %v. Panicking...", uRootHintWork.uRootHintHeight)
 					btcdLog.Errorf("%s", err)
 					panic(err)
 				}
 
-				wrk.server.StartUtreexoRootHintVerify(
-					wrk.inProcessRootHint, wrk.valChan)
+				wrk.server.StartUtreexoRootHintVerify(wrk.valChan)
 			} else {
 				break out
 			}

@@ -131,14 +131,71 @@ func (b *BlockChain) processOrphans(hash *chainhash.Hash, flags BehaviorFlags) e
 	return nil
 }
 
+func (b *BlockChain) SetBlockIndex(idx *SharedBlockIndex) {
+	b.index = idx.blockIndex
+}
+
+func (b *BlockChain) SetStartingTip(uRootHint *chaincfg.UtreexoRootHint) error {
+	// if the uRootHint is nil, we're starting from genesis. No need to do
+	// anything
+	if uRootHint == nil {
+		return nil
+	}
+	node := b.index.LookupNode(uRootHint.Hash)
+	if node == nil {
+		err := fmt.Errorf("header %s is unknown", uRootHint.Hash)
+		return err
+	}
+
+	b.bestChain.SetTip(node)
+	b.stateSnapshot = newBestState(node, 0, 0, 0,
+		0, time.Unix(node.timestamp, 0))
+	return nil
+}
+
+func InitAndSetBIdx(headers []*wire.BlockHeader, hashes []chainhash.Hash, params *chaincfg.Params) (*SharedBlockIndex, error) {
+	index := newBlockIndex(nil, params)
+
+	if len(headers) != len(hashes) {
+		return nil, fmt.Errorf("Got %d headers but were only given %d header hashes",
+			len(headers), len(hashes))
+	}
+
+	// Create a new node from the genesis block and set it as the best node.
+	genesisBlock := btcutil.NewBlock(params.GenesisBlock)
+	genesisBlock.SetHeight(0)
+	header := &genesisBlock.MsgBlock().Header
+	node := newBlockNode(header, nil)
+	node.status = statusDataStored | statusValid
+	// Add the new node to the index which is used for faster lookups.
+	index.addNode(node)
+
+	for i, header := range headers {
+		// Check if the previous block header exists
+		prevHash := &header.PrevBlock
+		prevNode := index.LookupNode(prevHash)
+		if prevNode == nil {
+			str := fmt.Sprintf("previous header %s is unknown", prevHash)
+			return nil, ruleError(ErrPreviousHeaderUnknown, str)
+		}
+
+		// Create a new block node for the block and add it to the node index.
+		newNode := newBlockNodeNoHash(header, &hashes[i], prevNode)
+		index.AddNode(newNode)
+		newNode.BuildAncestor()
+	}
+
+	return &SharedBlockIndex{index}, nil
+}
+
 // ProcessHeaders loops through all the headers. None are saved if even one
 // header is deemed invalid
 // No headers are saved to disk as there is no need to keep a state of the
 // block index since we don't resume for utreexo root verify mode.
-func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders, utreexoStartRoot *chaincfg.UtreexoRootHint) error {
+func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders, utreexoStartRoot *chaincfg.UtreexoRootHint, flags BehaviorFlags) error {
 	var err error
 	for _, header := range headers.Headers {
-		err = b.maybeAcceptHeader(header, utreexoStartRoot)
+		err = b.maybeAcceptHeader(header, utreexoStartRoot, flags)
 		if err != nil {
 			return err
 		}
@@ -151,12 +208,6 @@ func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders, utreexoStartRoot *
 // ProcessHeaderUBlock is the main function for verifying blocks for the utreeso root verify mode.
 // No state is saved during this process.
 func (b *BlockChain) ProcessHeaderUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, bool, error) {
-	log.Tracef("Enter Processing ublock")
-
-	if b.utreexoQuit {
-		log.Infof("UTREEXOQUIT: Quit is received")
-		return true, false, nil
-	}
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 

@@ -134,6 +134,29 @@ func newBlockNode(blockHeader *wire.BlockHeader, parent *blockNode) *blockNode {
 	return &node
 }
 
+func initBlockNodeNoHash(node *blockNode, blockHeader *wire.BlockHeader, hash *chainhash.Hash, parent *blockNode) {
+	*node = blockNode{
+		hash:       *hash,
+		workSum:    CalcWork(blockHeader.Bits),
+		version:    blockHeader.Version,
+		bits:       blockHeader.Bits,
+		nonce:      blockHeader.Nonce,
+		timestamp:  blockHeader.Timestamp.Unix(),
+		merkleRoot: blockHeader.MerkleRoot,
+	}
+	if parent != nil {
+		node.parent = parent
+		node.height = parent.height + 1
+		node.workSum = node.workSum.Add(parent.workSum, node.workSum)
+	}
+}
+
+func newBlockNodeNoHash(blockHeader *wire.BlockHeader, hash *chainhash.Hash, parent *blockNode) *blockNode {
+	var node blockNode
+	initBlockNodeNoHash(&node, blockHeader, hash, parent)
+	return &node
+}
+
 // Header constructs a block header from the node and returns it.
 //
 // This function is safe for concurrent access.
@@ -303,6 +326,10 @@ func findHighestCommonAncestor(node1, node2 *blockNode) *blockNode {
 	}
 
 	return node1
+}
+
+type SharedBlockIndex struct {
+	*blockIndex
 }
 
 // blockIndex provides facilities for keeping track of an in-memory index of the

@@ -216,6 +216,25 @@ func (b *BlockChain) SetUtreexoViewpoint(rootHint *chaincfg.UtreexoRootHint) err
 	return nil
 }
 
+func GenUtreexoViewpoint(rootHint *chaincfg.UtreexoRootHint) (*UtreexoViewpoint, error) {
+	uView := NewUtreexoViewpoint()
+	if rootHint == nil {
+		return uView, nil
+	}
+
+	rootBytes, err := chaincfg.UtreexoRootHintToBytes(*rootHint)
+	if err != nil {
+		return nil, err
+	}
+
+	err = deserializeUtreexoView(uView, rootBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return uView, nil
+}
+
 // NewUtreexoViewpoint returns an empty UtreexoViewpoint
 func NewUtreexoViewpoint() *UtreexoViewpoint {
 	return &UtreexoViewpoint{

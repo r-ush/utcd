@@ -2435,14 +2435,111 @@ cleanup:
 	srvrLog.Tracef("Peer handler done")
 }
 
-func (s *server) uRootVerifyPeerHandler(utreexoRootToVerify *chaincfg.UtreexoRootHint, uRootVerifyChan chan bool) {
+func (s *server) headerDownloadPeerHandler(utreexoRootToVerify *chaincfg.UtreexoRootHint, doneChan chan struct{}) {
 	// Start the address manager and sync manager, both of which are needed
 	// by peers.  This is done here since their lifecycle is closely tied
 	// to this handler and rather than adding more channels to sychronize
 	// things, it's easier and slightly faster to simply start and stop them
 	// in this handler.
 	s.addrManager.Start()
-	s.syncManager.StartUtreexoRootHintVerify(utreexoRootToVerify, uRootVerifyChan)
+	s.syncManager.StartHeadersDownload(utreexoRootToVerify, doneChan)
+
+	srvrLog.Tracef("Starting peer handler")
+
+	state := &peerState{
+		inboundPeers:    make(map[int32]*serverPeer),
+		persistentPeers: make(map[int32]*serverPeer),
+		outboundPeers:   make(map[int32]*serverPeer),
+		banned:          make(map[string]time.Time),
+		outboundGroups:  make(map[string]int),
+	}
+
+	if !cfg.DisableDNSSeed {
+		// Add peers discovered through DNS to the address manager.
+		connmgr.SeedFromDNS(activeNetParams.Params, defaultRequiredServices,
+			btcdLookup, func(addrs []*wire.NetAddress) {
+				// Bitcoind uses a lookup of the dns seeder here. This
+				// is rather strange since the values looked up by the
+				// DNS seed lookups will vary quite a lot.
+				// to replicate this behaviour we put all addresses as
+				// having come from the first one.
+				s.addrManager.AddAddresses(addrs, addrs[0])
+			})
+	}
+	go s.connManager.Start()
+
+out:
+	for {
+		select {
+		// New peers connected to the server.
+		case p := <-s.newPeers:
+			s.handleAddPeerMsg(state, p)
+
+		// Disconnected peers.
+		case p := <-s.donePeers:
+			s.handleDonePeerMsg(state, p)
+
+		// Block accepted in mainchain or orphan, update peer height.
+		case umsg := <-s.peerHeightsUpdate:
+			s.handleUpdatePeerHeights(state, umsg)
+
+		// Peer to ban.
+		case p := <-s.banPeers:
+			s.handleBanPeerMsg(state, p)
+
+		// New inventory to potentially be relayed to other peers.
+		case invMsg := <-s.relayInv:
+			s.handleRelayInvMsg(state, invMsg)
+
+		// Message to broadcast to all connected peers except those
+		// which are excluded by the message.
+		case bmsg := <-s.broadcast:
+			s.handleBroadcastMsg(state, &bmsg)
+
+		case qmsg := <-s.query:
+			s.handleQuery(state, qmsg)
+
+		case <-s.quit:
+			// Disconnect all peers on server shutdown.
+			state.forAllPeers(func(sp *serverPeer) {
+				srvrLog.Tracef("Shutdown peer %s", sp)
+				sp.Disconnect()
+			})
+			break out
+		}
+	}
+
+	s.connManager.Stop()
+	s.syncManager.Stop()
+	s.addrManager.Stop()
+
+	// Drain channels before exiting so nothing is left waiting around
+	// to send.
+cleanup:
+	for {
+		select {
+		case <-s.newPeers:
+		case <-s.donePeers:
+		case <-s.peerHeightsUpdate:
+		case <-s.relayInv:
+		case <-s.broadcast:
+		case <-s.query:
+		default:
+			break cleanup
+		}
+	}
+	s.wg.Done()
+	srvrLog.Tracef("Peer handler done")
+}
+
+func (s *server) uRootVerifyPeerHandler(uRootVerifyChan chan bool) {
+	// Start the address manager and sync manager, both of which are needed
+	// by peers.  This is done here since their lifecycle is closely tied
+	// to this handler and rather than adding more channels to sychronize
+	// things, it's easier and slightly faster to simply start and stop them
+	// in this handler.
+	s.addrManager.Start()
+	s.syncManager.StartUtreexoRootHintVerify(uRootVerifyChan)
 
 	srvrLog.Tracef("Starting peer handler")
 
@@ -2708,7 +2805,7 @@ func (s *server) Start(utreexoRootToVerify *chaincfg.UtreexoRootHint) {
 }
 
 // Start begins accepting connections from peers.
-func (s *server) StartUtreexoRootHintVerify(utreexoRootToVerify *chaincfg.UtreexoRootHint, uRootVerifyChan chan bool) {
+func (s *server) StartUtreexoRootHintVerify(uRootVerifyChan chan bool) {
 	// Already started?
 	if atomic.AddInt32(&s.started, 1) != 1 {
 		return
@@ -2723,9 +2820,29 @@ func (s *server) StartUtreexoRootHintVerify(utreexoRootToVerify *chaincfg.Utreex
 
 	// If the server is to verify a range of blocks based on the
 	// utreexo roots, only check those and exit
-	srvrLog.Infof("Starting verification of the root: %v",
+	//srvrLog.Infof("Starting verification of the root: %v", utreexoRootToVerify.Height)
+	go s.uRootVerifyPeerHandler(uRootVerifyChan)
+}
+
+// Start begins accepting connections from peers.
+func (s *server) StartHeadersDownload(utreexoRootToVerify *chaincfg.UtreexoRootHint, doneChan chan struct{}) {
+	// Already started?
+	if atomic.AddInt32(&s.started, 1) != 1 {
+		return
+	}
+
+	// Server startup time. Used for the uptime command for uptime calculation.
+	s.startupTime = time.Now().Unix()
+
+	// Start the peer handler which in turn starts the address and block
+	// managers.
+	s.wg.Add(1)
+
+	// If the server is to verify a range of blocks based on the
+	// utreexo roots, only check those and exit
+	srvrLog.Infof("Starting headers download to height: %v",
 		utreexoRootToVerify.Height)
-	go s.uRootVerifyPeerHandler(utreexoRootToVerify, uRootVerifyChan)
+	go s.headerDownloadPeerHandler(utreexoRootToVerify, doneChan)
 }
 
 // Stop gracefully shuts down the server by stopping and disconnecting all
@@ -3076,6 +3193,9 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	var assumevalidHash *chainhash.Hash
 	if !cfg.NoAssumeValid {
 		assumevalidHash = s.chainParams.AssumeValid
+		btcdLog.Infof("Setting assumevalidHash to %s", s.chainParams.AssumeValid.String())
+	} else {
+		btcdLog.Infof("No assumevalidHash set. Checking all signatures")
 	}
 
 	// Set Utreexo rootHints. Greater than 0 means the user has set a verify height
@@ -3191,6 +3311,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		ChainParams:           s.chainParams,
 		DisableCheckpoints:    cfg.DisableCheckpoints,
 		MaxPeers:              cfg.MaxPeers,
+		UtreexoMN:             cfg.UtreexoMainNode,
 		UtreexoCSN:            cfg.UtreexoCSN,
 		UtreexoRootVerifyMode: utreexoRootVerifyMode,
 		FeeEstimator:          s.feeEstimator,

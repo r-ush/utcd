@@ -14,7 +14,7 @@ import (
 )
 
 // maybeAcceptHeader potentially accepts a block header to build the block index
-func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoot *chaincfg.UtreexoRootHint) error {
+func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoot *chaincfg.UtreexoRootHint, flags BehaviorFlags) error {
 	// Check if the previous block header exists
 	prevHash := &header.PrevBlock
 	prevNode := b.index.LookupNode(prevHash)
@@ -24,8 +24,7 @@ func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoo
 	}
 
 	// Check sanity. This includes timestamp checking
-	behaviorFlags := BFNone
-	err := checkBlockHeaderSanity(header, b.chainParams.PowLimit, b.timeSource, behaviorFlags)
+	err := checkBlockHeaderSanity(header, b.chainParams.PowLimit, b.timeSource, flags)
 	if err != nil {
 		return err
 	}
@@ -80,15 +79,9 @@ func (b *BlockChain) maybeAcceptHeaderUBlock(ublock *btcutil.UBlock, flags Behav
 		return false, err
 	}
 
-	// Create a new block node for the block and add it to the node index. Even
-	// if the block ultimately gets connected to the main chain, it starts out
-	// on a side chain.
-	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
-	newNode := newBlockNode(blockHeader, prevNode)
-	newNode.BuildAncestor()
-	newNode.status = statusDataStored
+	curNode := b.index.LookupNode(ublock.Hash())
 
-	isMainChain, err := b.connectBestChainUBlock(newNode, ublock, flags)
+	isMainChain, err := b.connectBestChainParallel(curNode, ublock, flags)
 	if err != nil {
 		return false, err
 	}

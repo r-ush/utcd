@@ -1429,7 +1429,7 @@ func (b *BlockChain) initChainState() error {
 		blockWeight := uint64(GetBlockWeight(genesisBlock))
 		b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
 			numTxns, time.Unix(node.timestamp, 0))
-		prevUtreexoRoot := b.findPreviousUtreexoRootHint(b.utreexoRootToVerify.Height)
+		prevUtreexoRoot := b.FindPreviousUtreexoRootHint(b.utreexoRootToVerify.Height)
 		// This means we're verifing from genesis
 		if prevUtreexoRoot == nil {
 			// Create empty utreexoViewpoint
