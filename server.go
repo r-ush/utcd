@@ -63,7 +63,7 @@ const (
 var (
 	// userAgentName is the user agent name and is used to help identify
 	// ourselves to other bitcoin peers.
-	userAgentName = "csn"
+	userAgentName = "utreexo"
 
 	// userAgentVersion is the user agent version and is used to help
 	// identify ourselves to other bitcoin peers.
@@ -205,6 +205,9 @@ type server struct {
 	shutdown      int32
 	shutdownSched int32
 	startupTime   int64
+
+	msgBlockSizeSent uint64
+	udataSizeSent    uint64
 
 	chainParams          *chaincfg.Params
 	addrManager          *addrmgr.AddrManager
@@ -1695,6 +1698,7 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	err := sp.server.db.View(func(dbTx database.Tx) error {
 		var err error
 		blockBytes, err = dbTx.FetchBlock(hash)
+
 		return err
 	})
 	if err != nil {
@@ -1720,9 +1724,7 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 		return err
 	}
 
-	// Fetch the utreexo proof
-	var ud *btcacc.UData
-	ud, err = s.chain.FetchProof(hash)
+	height, err := s.chain.LookupNode(hash)
 	if err != nil {
 		peerLog.Tracef("Unable to fetch requested block proof %v: %v",
 			hash, err)
@@ -1732,6 +1734,25 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 		}
 		return err
 	}
+
+	// Fetch the utreexo proof
+	var ud *btcacc.UData
+	ud, err = s.chain.FetchProof(height)
+	if err != nil {
+		peerLog.Tracef("Unable to fetch requested block proof %v: %v",
+			hash, err)
+
+		if doneChan != nil {
+			doneChan <- struct{}{}
+		}
+		return err
+	}
+
+	//udSize := uint64(ud.SerializeSizeVarInt())
+	//msgBlockSize := uint64(msgBlock.SerializeSize())
+
+	//atomic.AddUint64(&s.udataSizeSent, udSize)
+	//atomic.AddUint64(&s.msgBlockSizeSent, msgBlockSize)
 
 	// Create ublock
 	ublock := wire.MsgUBlock{
@@ -2853,6 +2874,9 @@ func (s *server) Stop() error {
 		srvrLog.Infof("Server is already in the process of shutting down")
 		return nil
 	}
+
+	srvrLog.Infof("msgBlockSizeSent is %d. udataSizeSent is %d",
+		s.msgBlockSizeSent, s.udataSizeSent)
 
 	srvrLog.Warnf("Server shutting down")
 

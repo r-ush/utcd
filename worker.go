@@ -525,6 +525,7 @@ func (rwrk *RemoteWorker) WaitForShutdown() {
 }
 
 func (rwrk *RemoteWorker) setHeaders(msg *MsgStartHeaders) error {
+	btcdLog.Infof("Creating blockindex...")
 	index, err := blockchain.InitAndSetBIdx(msg.headers.headers[:], msg.headers.hashes[:], activeNetParams.Params)
 	if err != nil {
 		panic(err)

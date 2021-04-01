@@ -296,30 +296,6 @@ func (sm *SyncManager) ValidateUtreexoRoot() error {
 	return nil
 }
 
-// syncWorker is a single worker for parallel block sync for utreexo
-// compact state nodes
-type syncWorker struct {
-	// These fields should only be accessed from the blockHandler thread
-	rejectedTxns    map[chainhash.Hash]struct{}
-	requestedTxns   map[chainhash.Hash]struct{}
-	requestedBlocks map[chainhash.Hash]struct{}
-
-	syncPeer         *peerpkg.Peer
-	peerStates       map[*peerpkg.Peer]*peerSyncState
-	lastProgressTime time.Time
-	chain            *blockchain.BlockChain
-
-	// The following fields are used for headers-first mode.
-	headersFirstMode bool
-	utreexoCSN       bool
-	headerList       *list.List
-	startHeader      *list.Element
-	nextCheckpoint   *chaincfg.Checkpoint
-
-	firstUBlock *btcutil.UBlock
-	blockchan   chan struct{}
-}
-
 // SyncManager is used to communicate block related messages with peers. The
 // SyncManager is started as by executing Start() in a goroutine. Once started,
 // it selects peers to sync from and starts the initial block download. Once the
@@ -357,6 +333,7 @@ type SyncManager struct {
 	utreexoRootToVerify   *chaincfg.UtreexoRootHint
 	utreexoStartRoot      *chaincfg.UtreexoRootHint
 	newSyncPeer           chan struct{}
+	newSyncNum            int8
 
 	// An optional fee estimator.
 	feeEstimator *mempool.FeeEstimator
@@ -635,7 +612,10 @@ func (sm *SyncManager) handleNewPeerMsg(peer *peerpkg.Peer) {
 
 	// Start syncing by choosing the best candidate if needed.
 	if isSyncCandidate && sm.syncPeer == nil {
-		close(sm.newSyncPeer)
+		if sm.newSyncNum == 0 {
+			close(sm.newSyncPeer)
+			sm.newSyncNum++
+		}
 		sm.startSync()
 	}
 }

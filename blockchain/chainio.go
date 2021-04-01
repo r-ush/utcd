@@ -2044,26 +2044,13 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 // FetchProof, given a block hash, will return the udata associated with that block
 //
 // This function is safe for concurrent access.
-func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
-	var height int32
-	err := b.db.View(func(dbTx database.Tx) error {
-		var err error
-		height, err = dbFetchHeightByHash(dbTx, hash)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
+func (b *BlockChain) FetchProof(height int32) (*btcacc.UData, error) {
 	// pre-allocate buf
 	buf := make([]byte, 8)
 
 	// First read the offset of where the proof is in the offsetfile
 	b.proofFileState.offsetState.rwMutex.RLock()
-	_, err = b.proofFileState.offsetState.file.ReadAt(buf, int64(8*height))
+	_, err := b.proofFileState.offsetState.file.ReadAt(buf, int64(8*height))
 	if err != nil {
 		return nil, err
 	}

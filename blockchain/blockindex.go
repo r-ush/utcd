@@ -5,6 +5,7 @@
 package blockchain
 
 import (
+	"fmt"
 	"math/big"
 	"sort"
 	"sync"
@@ -462,4 +463,13 @@ func (bi *blockIndex) flushToDB() error {
 
 	bi.Unlock()
 	return err
+}
+
+func (b *BlockChain) LookupNode(hash *chainhash.Hash) (int32, error) {
+	node := b.index.LookupNode(hash)
+	if node == nil {
+		return 0, fmt.Errorf("Unable to find a blockheight for hash %v", hash.String())
+	}
+
+	return node.height, nil
 }

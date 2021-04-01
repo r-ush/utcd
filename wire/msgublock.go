@@ -24,7 +24,7 @@ func (msgu *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) 
 	}
 
 	msgu.UtreexoData = btcacc.UData{}
-	err = msgu.UtreexoData.Deserialize(r)
+	err = msgu.UtreexoData.Decode(r)
 
 	return nil
 }
@@ -36,7 +36,7 @@ func (msgu *MsgUBlock) Deserialize(r io.Reader) (err error) {
 		return err
 	}
 
-	err = msgu.UtreexoData.Deserialize(r)
+	err = msgu.UtreexoData.Decode(r)
 	return
 }
 
@@ -45,7 +45,7 @@ func (msgu *MsgUBlock) BtcEncode(r io.Writer, pver uint32, enc MessageEncoding) 
 	if err != nil {
 		return err
 	}
-	err = msgu.UtreexoData.Serialize(r)
+	err = msgu.UtreexoData.Encode(r)
 
 	return nil
 }
@@ -55,7 +55,7 @@ func (msgu *MsgUBlock) Serialize(w io.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	err = msgu.UtreexoData.Serialize(w)
+	err = msgu.UtreexoData.Encode(w)
 	return
 }
 
