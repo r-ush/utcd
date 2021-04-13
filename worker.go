@@ -433,7 +433,7 @@ func NewRemoteWorker(num int8, hState *headerState) (*RemoteWorker, error) {
 		quit:               make(chan struct{}),
 		headersSet:         make(chan struct{}),
 		getWorkChan:        make(chan *work, 1),
-		workChan:           make(chan *work, 1),
+		workChan:           make(chan *work, 5),
 		valChan:            make(chan netsync.ProcessedURootHint, 100),
 		inProcessRootHints: make(map[int32]struct{}),
 	}
@@ -454,7 +454,8 @@ func NewRemoteWorker(num int8, hState *headerState) (*RemoteWorker, error) {
 func (rwrk *RemoteWorker) GetWork() {
 	// If we have this channel, we can have a blocking read
 	// while also listening for the quit signal
-	go func() {
+out:
+	for {
 		msg, err := makeEmptyMessage(CmdGetWork)
 		if err != nil {
 			panic(err)
@@ -463,14 +464,14 @@ func (rwrk *RemoteWorker) GetWork() {
 		if err != nil {
 			panic(err)
 		}
-	}()
 
-	select {
-	case work := <-rwrk.workChan:
-		rwrk.getWorkChan <- work
-		break
-	case <-rwrk.quit:
-		break
+		select {
+		case work := <-rwrk.workChan:
+			rwrk.getWorkChan <- work
+			break
+		case <-rwrk.quit:
+			break out
+		}
 	}
 }
 
@@ -679,6 +680,8 @@ func (rwrk *RemoteWorker) workHandler() {
 	go rwrk.listen()
 
 	rwrk.server.StartUtreexoRootHintVerify(rwrk.valChan)
+
+	go rwrk.GetWork()
 out:
 	for {
 
@@ -705,7 +708,7 @@ out:
 		btcdLog.Tracef("remote worker num %v queuing for work", rwrk.num)
 		btcdLog.Infof("remote worker num %v queuing for work", rwrk.num)
 
-		rwrk.GetWork()
+		//rwrk.GetWork()
 		// TODO receive work here
 		select {
 		case work, ok := <-rwrk.getWorkChan:
