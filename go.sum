@@ -42,10 +42,14 @@ github.com/jessevdk/go-flags v1.4.0 h1:4IU2WS7AumrZ/40jfhf4QVDMsQwqA7VEHozFRrGAR
 github.com/jessevdk/go-flags v1.4.0/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
 github.com/jrick/logrotate v1.0.0 h1:lQ1bL/n9mBNeIXoTUoYRlK4dHuNJVofX9oWqBtPnSzI=
 github.com/jrick/logrotate v1.0.0/go.mod h1:LNinyqDIJnpAur+b8yyulnQw/wDuN1+BYKlTRt3OuAQ=
+github.com/kcalvinalvin/utreexo v0.0.0-20210413154049-b5e783f48d4a h1:biP/Re3yuUiiAHDAdm4AK1fkmxO281eK3JziQ/9hzQY=
+github.com/kcalvinalvin/utreexo v0.0.0-20210413154049-b5e783f48d4a/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23 h1:FOOIBWrEkLgmlgGfMuZT83xIwfPDxEI2OHu6xUmJMFE=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6CZQHDETBtE9HaSEkGmuNXF86RwHhHUvq4=
 github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498 h1:luTD6pTVYv5BMGuf+GkOCedIYZo9jMaA5USZULZCCvM=
 github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498/go.mod h1:ST9y+SCOD6G6J48CwoMwtmQ+ATLrDuwS7rfZWNrsEPg=
+github.com/mit-dci/utcutil v1.0.3-0.20210413154336-a1ad35fe261e h1:C0YQJlkkVhHBpWzuLamFoc+y4WpQnR6GKsdoN3rlUAk=
+github.com/mit-dci/utcutil v1.0.3-0.20210413154336-a1ad35fe261e/go.mod h1:AdyPGg3l4TNJ8nidehY0wPisNc7K+byDYy6GDYAT7oQ=
 github.com/mit-dci/utreexo v0.0.0-20210113220559-fe368b8feff3 h1:cwTBVWcYOvNbZrxK/xDQFU62Iphz526jFeQSXSFNHTE=
 github.com/mit-dci/utreexo v0.0.0-20210113220559-fe368b8feff3/go.mod h1:Fkwf5QjCAkJxTCWWARKviyBWIX4v2NRcFsd0f0eZZjs=
 github.com/mit-dci/utreexo v0.0.0-20210222154807-259fc1a7bf87 h1:BF7YuGh+385ZsF20Og2Ud6ilMt/3Dm66kp5VTuZNwTI=

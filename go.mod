@@ -12,9 +12,12 @@ require (
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
 	github.com/mit-dci/utreexo v0.0.0-20210315015810-f7abca0043fb
+	github.com/piotrnar/gocoin v0.0.0-20210221093853-ec4713336ba8
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 )
 
 go 1.15
 
-replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498
+replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210413154336-a1ad35fe261e
+replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20210413154049-b5e783f48d4a
+//replace github.com/piotrnar/gocoin => /home/calvin/bitcoin-projects/go/utreexo1/go/src/github.com/piotrnar/gocoin
