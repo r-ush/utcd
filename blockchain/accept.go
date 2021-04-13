@@ -31,7 +31,7 @@ func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoo
 
 	// Create a new block node for the block and add it to the node index.
 	newNode := newBlockNode(header, prevNode)
-	b.index.AddNode(newNode)
+	b.index.AddNodeNoDirty(newNode)
 	newNode.BuildAncestor()
 
 	// If we're in utreexo root verify mode and is
@@ -56,10 +56,10 @@ func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoo
 
 // maybeAcceptHeaderUBlock is used for the utreesxo root verify mode and doesn't save
 // any blocks to the disk.
-func (b *BlockChain) maybeAcceptHeaderUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
+func (b *BlockChain) maybeAcceptHeaderUBlock(ublock *btcutil.UBlock, uView *UtreexoViewpoint, flags BehaviorFlags) (bool, error) {
 	// The height of this block is one more than the referenced previous
 	// block.
-	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	prevHash := &ublock.Block().MsgBlock().Header.PrevBlock
 	prevNode := b.index.LookupNode(prevHash)
 	if prevNode == nil {
 		str := fmt.Sprintf("previous block %s is unknown", prevHash)
@@ -81,7 +81,7 @@ func (b *BlockChain) maybeAcceptHeaderUBlock(ublock *btcutil.UBlock, flags Behav
 
 	curNode := b.index.LookupNode(ublock.Hash())
 
-	isMainChain, err := b.connectBestChainParallel(curNode, ublock, flags)
+	isMainChain, err := b.connectBestChainParallel(curNode, ublock, uView, flags)
 	if err != nil {
 		return false, err
 	}
@@ -173,7 +173,7 @@ func (b *BlockChain) maybeAcceptBlock(block *btcutil.Block, flags BehaviorFlags)
 func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
 	// The height of this block is one more than the referenced previous
 	// block.
-	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	prevHash := &ublock.Block().MsgBlock().Header.PrevBlock
 	prevNode := b.index.LookupNode(prevHash)
 	if prevNode == nil {
 		str := fmt.Sprintf("previous block %s is unknown", prevHash)
@@ -216,7 +216,7 @@ func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFla
 	// Create a new block node for the block and add it to the node index. Even
 	// if the block ultimately gets connected to the main chain, it starts out
 	// on a side chain.
-	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
+	blockHeader := &ublock.Block().MsgBlock().Header
 	newNode := newBlockNode(blockHeader, prevNode)
 	newNode.BuildAncestor()
 	newNode.status = statusDataStored

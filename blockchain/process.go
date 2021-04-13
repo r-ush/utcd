@@ -181,7 +181,7 @@ func InitAndSetBIdx(headers []*wire.BlockHeader, hashes []chainhash.Hash, params
 
 		// Create a new block node for the block and add it to the node index.
 		newNode := newBlockNodeNoHash(header, &hashes[i], prevNode)
-		index.AddNode(newNode)
+		index.AddNodeNoDirty(newNode)
 		newNode.BuildAncestor()
 	}
 
@@ -207,7 +207,7 @@ func (b *BlockChain) ProcessHeaders(headers *wire.MsgHeaders, utreexoStartRoot *
 
 // ProcessHeaderUBlock is the main function for verifying blocks for the utreeso root verify mode.
 // No state is saved during this process.
-func (b *BlockChain) ProcessHeaderUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, bool, error) {
+func (b *BlockChain) ProcessHeaderUBlock(ublock *btcutil.UBlock, uView *UtreexoViewpoint, flags BehaviorFlags) (bool, bool, error) {
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 
@@ -232,7 +232,7 @@ func (b *BlockChain) ProcessHeaderUBlock(ublock *btcutil.UBlock, flags BehaviorF
 
 	// The block has passed all context independent checks and appears sane
 	// enough to potentially accept it into the block chain.
-	isMainChain, err := b.maybeAcceptHeaderUBlock(ublock, flags)
+	isMainChain, err := b.maybeAcceptHeaderUBlock(ublock, uView, flags)
 	if err != nil {
 		return false, false, err
 	}
@@ -459,7 +459,7 @@ func (b *BlockChain) ProcessUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) 
 	// rejecting easy to mine, but otherwise bogus, blocks that could be
 	// used to eat memory, and ensuring expected (versus claimed) proof of
 	// work requirements since the previous checkpoint are met.
-	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
+	blockHeader := &ublock.Block().MsgBlock().Header
 	checkpointNode, err := b.findPreviousCheckpoint()
 	if err != nil {
 		return false, false, err

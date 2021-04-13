@@ -1414,7 +1414,7 @@ func (b *BlockChain) checkConnectParallel(node *blockNode, ublock *btcutil.UBloc
 
 	// Enforce DER signatures for block versions 3+ once the historical
 	// activation threshold has been reached.  This is part of BIP0066.
-	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
+	blockHeader := &ublock.Block().MsgBlock().Header
 	if blockHeader.Version >= 3 && node.height >= b.chainParams.BIP0066Height {
 		scriptFlags |= txscript.ScriptVerifyDERSignatures
 	}
@@ -1657,7 +1657,7 @@ func (b *BlockChain) checkConnectUBlock(node *blockNode, ublock *btcutil.UBlock,
 
 	// Enforce DER signatures for block versions 3+ once the historical
 	// activation threshold has been reached.  This is part of BIP0066.
-	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
+	blockHeader := &ublock.Block().MsgBlock().Header
 	if blockHeader.Version >= 3 && node.height >= b.chainParams.BIP0066Height {
 		scriptFlags |= txscript.ScriptVerifyDERSignatures
 	}

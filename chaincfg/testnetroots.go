@@ -2,7 +2,7 @@ package chaincfg
 
 import "github.com/btcsuite/btcd/chaincfg/chainhash"
 
-var roots = []UtreexoRootHint{
+var testnetRoots = []UtreexoRootHint{
 	{1000, newHashFromStr("00000000373403049c5fff2cd653590e8cbe6f7ac639db270e7d1a7503d698df"),
 		1197, []*chainhash.Hash{
 			newLeafHashFromStr("1ad2add104463d2fd90e3182ed1b16abf7a959a7fe0ba8184242fa2d36382e74"),

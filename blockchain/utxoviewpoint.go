@@ -489,7 +489,7 @@ func (view *UtxoViewpoint) UBlockToUtxoView(ub btcutil.UBlock) error {
 	m := view.Entries()
 	// loop through leafDatas and convert them into UtxoEntries (pretty much the
 	// same thing
-	for _, ld := range ub.MsgUBlock().UtreexoData.Stxos {
+	for _, ld := range ub.UData().Stxos {
 		txo := wire.NewTxOut(ld.Amt, ld.PkScript)
 		utxo := NewUtxoEntry(txo, ld.Height, ld.Coinbase)
 		op := wire.OutPoint{

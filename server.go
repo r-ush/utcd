@@ -2553,7 +2553,7 @@ cleanup:
 	srvrLog.Tracef("Peer handler done")
 }
 
-func (s *server) uRootVerifyPeerHandler(uRootVerifyChan chan bool) {
+func (s *server) uRootVerifyPeerHandler(uRootVerifyChan chan netsync.ProcessedURootHint) {
 	// Start the address manager and sync manager, both of which are needed
 	// by peers.  This is done here since their lifecycle is closely tied
 	// to this handler and rather than adding more channels to sychronize
@@ -2793,16 +2793,8 @@ func (s *server) Start(utreexoRootToVerify *chaincfg.UtreexoRootHint) {
 	// managers.
 	s.wg.Add(1)
 
-	// If the server is to verify a range of blocks based on the
-	// utreexo roots, only check those and exit
-	if cfg.UtreexoRootVerifyHeight > 0 {
-		srvrLog.Infof("Starting verification of the root: %v",
-			cfg.UtreexoRootVerifyHeight)
-		go s.peerHandler(utreexoRootToVerify)
-	} else {
-		srvrLog.Trace("Starting server")
-		go s.peerHandler(nil)
-	}
+	srvrLog.Trace("Starting server")
+	go s.peerHandler(nil)
 
 	if s.nat != nil {
 		s.wg.Add(1)
@@ -2826,7 +2818,7 @@ func (s *server) Start(utreexoRootToVerify *chaincfg.UtreexoRootHint) {
 }
 
 // Start begins accepting connections from peers.
-func (s *server) StartUtreexoRootHintVerify(uRootVerifyChan chan bool) {
+func (s *server) StartUtreexoRootHintVerify(uRootVerifyChan chan netsync.ProcessedURootHint) {
 	// Already started?
 	if atomic.AddInt32(&s.started, 1) != 1 {
 		return
@@ -3161,7 +3153,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		db:                   db,
 		timeSource:           blockchain.NewMedianTime(),
 		services:             services,
-		sigCache:             txscript.NewSigCache(cfg.SigCacheMaxSize),
+		sigCache:             txscript.NewSigCache(0),
 		hashCache:            txscript.NewHashCache(cfg.SigCacheMaxSize),
 		cfCheckptCaches:      make(map[wire.FilterType][]cfHeaderKV),
 		agentBlacklist:       agentBlacklist,
@@ -3222,22 +3214,10 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		btcdLog.Infof("No assumevalidHash set. Checking all signatures")
 	}
 
-	// Set Utreexo rootHints. Greater than 0 means the user has set a verify height
 	var utreexoRootToVerify *chaincfg.UtreexoRootHint
-	if cfg.UtreexoRootVerifyHeight > 0 {
-		// Grab the correct root to verify
-		for _, utreexoRootHint := range s.chainParams.UtreexoRootHints {
-			if utreexoRootHint.Height == int32(cfg.UtreexoRootVerifyHeight) {
-				utreexoRootToVerify = &utreexoRootHint
-				break
-			}
-		}
-	} else {
-		utreexoRootToVerify = nil
-	}
 
 	var utreexoRootVerifyMode bool
-	if cfg.UtreexoWorker || cfg.UtreexoMainNode || cfg.UtreexoRootVerifyHeight > 0 {
+	if cfg.UtreexoWorker || cfg.UtreexoMainNode {
 		utreexoRootVerifyMode = true
 	}
 

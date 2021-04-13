@@ -429,6 +429,9 @@ var MainNetParams = Params{
 		//{560000, newHashFromStr("0000000000000000002c7b276daf6efb2b6aa68e2ce3be67ef925b3264ae7122")},
 	},
 
+	// UtreexoRootHints ordered from oldest to newest.
+	UtreexoRootHints: mainnetRoots,
+
 	// Consensus rule change deployments.
 	//
 	// The miner confirmation window is defined as:
@@ -602,7 +605,7 @@ var TestNet3Params = Params{
 	},
 
 	// UtreexoRootHints ordered from oldest to newest.
-	UtreexoRootHints: roots,
+	UtreexoRootHints: testnetRoots,
 	//[]UtreexoRootHint{
 	//	{546, newHashFromStr("000000002a936ca763904c3c35fce2f3556c559c0214345d31b1bcebf76acb70"),
 	//		743, []*chainhash.Hash{

@@ -2081,7 +2081,7 @@ func (b *BlockChain) FetchProof(height int32) (*btcacc.UData, error) {
 
 	size := binary.BigEndian.Uint32(buf)
 
-	if size > 1<<24 {
+	if size > 1<<31 {
 		return nil, fmt.Errorf("size at offest %d says %d which is too big", offset, size)
 	}
 
@@ -2118,11 +2118,13 @@ func (pf *ProofFileState) writeTTLs(block *btcutil.Block, stxos []SpentTxOut) er
 		// write it's lifespan as a 4 byte int32 (bit of a waste as
 		// 2 or 3 bytes would work)
 		// add 16: 4 for magic, 4 for size, 4 for height, 4 numTTL, then ttls start
+		pf.proofState.rwMutex.Lock()
 		_, err := pf.proofState.file.WriteAt(ttlBytes[:],
 			pf.offsets[stxos[i].Height]+16+int64(stxos[i].Index*4))
 		if err != nil {
 			return err
 		}
+		pf.proofState.rwMutex.Unlock()
 	}
 
 	return nil

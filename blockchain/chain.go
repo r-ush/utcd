@@ -325,7 +325,7 @@ func (b *BlockChain) GetOrphanRoot(hash *chainhash.Hash, utreexoCSN bool) *chain
 				break
 			}
 			orphanRoot = prevHash
-			prevHash = &orphan.ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+			prevHash = &orphan.ublock.Block().MsgBlock().Header.PrevBlock
 		}
 	} else {
 		// Protect concurrent access.  Using a read lock only so multiple
@@ -448,7 +448,7 @@ func (b *BlockChain) removeOrphanUBlock(orphan *orphanUBlock) {
 	// for loop is intentionally used over a range here as range does not
 	// reevaluate the slice on each iteration nor does it adjust the index
 	// for the modified slice.
-	prevHash := &orphan.ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	prevHash := &orphan.ublock.Block().MsgBlock().Header.PrevBlock
 	orphans := b.prevUOrphans[*prevHash]
 	for i := 0; i < len(orphans); i++ {
 		hash := orphans[i].ublock.Hash()
@@ -512,7 +512,7 @@ func (b *BlockChain) addOrphanUBlock(ublock *btcutil.UBlock) {
 	b.uOrphans[*ublock.Hash()] = uoBlock
 
 	// Add to previous hash lookup index for faster dependency lookups.
-	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	prevHash := &ublock.Block().MsgBlock().Header.PrevBlock
 	b.prevUOrphans[*prevHash] = append(b.prevUOrphans[*prevHash], uoBlock)
 }
 
@@ -908,7 +908,7 @@ func (b *BlockChain) connectUBlockParallel(node *blockNode, ublock *btcutil.UBlo
 // This function MUST be called with the chain state lock held (for writes).
 func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) error {
 	// Make sure it's extending the end of the best chain.
-	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	prevHash := &ublock.Block().MsgBlock().Header.PrevBlock
 	if !prevHash.IsEqual(&b.bestChain.Tip().hash) {
 		return AssertError("connectUBlock must be called with a ublock " +
 			"that extends the main chain")
@@ -930,8 +930,8 @@ func (b *BlockChain) connectUBlock(node *blockNode, ublock *btcutil.UBlock) erro
 		b.stateLock.RLock()
 		curTotalTxns := b.stateSnapshot.TotalTxns
 		b.stateLock.RUnlock()
-		numTxns := uint64(len(ublock.MsgUBlock().MsgBlock.Transactions))
-		blockSize := uint64(ublock.MsgUBlock().MsgBlock.SerializeSize())
+		numTxns := uint64(len(ublock.Block().MsgBlock().Transactions))
+		blockSize := uint64(ublock.Block().MsgBlock().SerializeSize())
 		blockWeight := uint64(GetBlockWeight(ublock.Block()))
 		state := newBestState(node, blockSize, blockWeight, numTxns,
 			curTotalTxns+numTxns, node.CalcPastMedianTime())
@@ -1529,7 +1529,7 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 // The flags modify the behavior of this function as follows:
 //  - BFFastAdd: Avoids several expensive transaction validation operations.
 //    This is useful when using checkpoints.
-func (b *BlockChain) connectBestChainParallel(node *blockNode, ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
+func (b *BlockChain) connectBestChainParallel(node *blockNode, ublock *btcutil.UBlock, uView *UtreexoViewpoint, flags BehaviorFlags) (bool, error) {
 	fastAdd := flags&BFFastAdd == BFFastAdd
 
 	// Perform several checks to verify the block can be connected
@@ -1537,7 +1537,7 @@ func (b *BlockChain) connectBestChainParallel(node *blockNode, ublock *btcutil.U
 	// actually connecting the block.
 	view := NewUtxoViewpoint()
 	if !fastAdd {
-		err := b.checkConnectUBlock(node, ublock, view)
+		err := b.checkConnectParallel(node, ublock, uView, view)
 		if err == nil {
 			b.index.SetStatusFlags(node, statusValid)
 		} else if _, ok := err.(RuleError); ok {
@@ -1557,7 +1557,7 @@ func (b *BlockChain) connectBestChainParallel(node *blockNode, ublock *btcutil.U
 	// this block.
 	if fastAdd {
 		// Check that the ublock txOuts are valid
-		err := b.utreexoViewpoint.Modify(ublock)
+		err := uView.Modify(ublock)
 		if err != nil {
 			return false, err
 		}
@@ -1568,19 +1568,12 @@ func (b *BlockChain) connectBestChainParallel(node *blockNode, ublock *btcutil.U
 	// Connect the block to the main chain.
 	err := b.connectUBlockParallel(node, ublock)
 	if err != nil {
-		parentHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+		parentHash := &ublock.Block().MsgBlock().Header.PrevBlock
 		// If we don't extend the best chain, then just error out
 		err := fmt.Errorf("The block %v does not extend the chain with parentHash of %v",
 			ublock.Hash().String(), parentHash.String())
 
 		return false, err
-	}
-
-	// If this is fast add, or this block node isn't yet marked as
-	// valid, then we'll update its status and flush the state to
-	// disk again.
-	if fastAdd || !b.index.NodeStatus(node).KnownValid() {
-		b.index.SetStatusFlags(node, statusValid)
 	}
 
 	return true, nil
@@ -1602,7 +1595,7 @@ func (b *BlockChain) connectBestChainUBlock(node *blockNode, ublock *btcutil.UBl
 
 	// We are extending the main (best) chain with a new block.  This is the
 	// most common case.
-	parentHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	parentHash := &ublock.Block().MsgBlock().Header.PrevBlock
 	if parentHash.IsEqual(&b.bestChain.Tip().hash) {
 		// Skip checks if node has already been fully validated.
 		fastAdd = fastAdd || b.index.NodeStatus(node).KnownValid()

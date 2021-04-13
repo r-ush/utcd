@@ -394,6 +394,18 @@ func (bi *blockIndex) AddNode(node *blockNode) {
 	bi.Unlock()
 }
 
+// AddNodeNoDirty adds the provided node to the block index.
+// Duplicate entries are not checked so it is up to caller to avoid adding them.
+// This function is meant for the utreexo parallel nodes which don't
+// flush to disk.
+//
+// This function is safe for concurrent access.
+func (bi *blockIndex) AddNodeNoDirty(node *blockNode) {
+	bi.Lock()
+	bi.addNode(node)
+	bi.Unlock()
+}
+
 // addNode adds the provided node to the block index, but does not mark it as
 // dirty. This can be used while initializing the block index.
 //

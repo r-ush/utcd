@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"runtime/pprof"
 	"runtime/trace"
 
@@ -121,14 +120,21 @@ func rootWorkerStart(interrupt <-chan struct{}) error {
 		defer pprof.StopCPUProfile()
 	}
 
+	// init/get the headers from the coordinator node
+	hState, err := InitBlockIndex()
+	if err != nil {
+		panic(err)
+	}
+
 	for i := int8(0); i < int8(cfg.NumWorkers); i++ {
-		workerNode := NewRemoteWorker(i)
+		workerNode, err := NewRemoteWorker(i, hState)
+		if err != nil {
+			panic(err)
+		}
 		workerNode.Start()
 	}
 
 	<-interrupt
-
-	fmt.Println("RETURN rootWorkerStart")
 
 	defer func() {
 		// Write mem profile if requested.
@@ -218,18 +224,11 @@ func btcdMain(serverChan chan<- *server) error {
 		return nil
 	}
 
-	// We don't need a db for the UtreexoRootVerifyHeight mode
-	var db database.DB
-	if cfg.UtreexoRootVerifyHeight < 0 {
-		// Load the block database.
-		var err error
-		db, err = loadBlockDB()
-		if err != nil {
-			btcdLog.Errorf("%v", err)
-			return err
-		}
-	} else {
-		db = nil
+	// Load the block database.
+	db, err := loadBlockDB()
+	if err != nil {
+		btcdLog.Errorf("%v", err)
+		return err
 	}
 
 	// Return now if an interrupt signal was triggered.
@@ -247,45 +246,42 @@ func btcdMain(serverChan chan<- *server) error {
 		return err
 	}
 
-	// Just quit for UtreexoRootVerifyHeight mode
-	if cfg.UtreexoRootVerifyHeight < 0 {
-		defer func() error {
-			// Ensure the database is sync'd and closed on shutdown.
-			btcdLog.Infof("Gracefully shutting down the database...")
+	defer func() error {
+		// Ensure the database is sync'd and closed on shutdown.
+		btcdLog.Infof("Gracefully shutting down the database...")
 
-			// UtreexoCSN should be closed before the database close
-			if cfg.UtreexoCSN {
-				err = server.chain.FlushMemBlockStore()
-				if err != nil {
-					return err
-				}
-
-				err = server.chain.FlushMemBestState()
-				if err != nil {
-					return err
-				}
-
-				err = server.chain.PutUtreexoView()
-
-				if err != nil {
-					return err
-				}
-			}
-			db.Close()
-
-			// Utreexo bridgenode stuff should be closed after the database close
-			if cfg.Utreexo {
-				// TODO add saving the utreexo proofs and forest here
-				err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
-				if err != nil {
-					return err
-				}
+		// UtreexoCSN should be closed before the database close
+		if cfg.UtreexoCSN {
+			err = server.chain.FlushMemBlockStore()
+			if err != nil {
+				return err
 			}
 
-			return nil
-		}()
+			err = server.chain.FlushMemBestState()
+			if err != nil {
+				return err
+			}
 
-	}
+			err = server.chain.PutUtreexoView()
+
+			if err != nil {
+				return err
+			}
+		}
+		db.Close()
+
+		// Utreexo bridgenode stuff should be closed after the database close
+		if cfg.Utreexo {
+			// TODO add saving the utreexo proofs and forest here
+			err = server.chain.WriteUtreexoBridgeState(filepath.Join(cfg.DataDir, "bridge_data"))
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}()
+
 	defer func() {
 		// Write mem profile if requested.
 		if cfg.MemProfile != "" {
@@ -299,6 +295,9 @@ func btcdMain(serverChan chan<- *server) error {
 			memf.Close()
 		}
 	}()
+
+	server.Start(nil)
+
 	defer func() {
 		btcdLog.Infof("Gracefully shutting down the server...")
 		server.Stop()
@@ -306,20 +305,6 @@ func btcdMain(serverChan chan<- *server) error {
 		srvrLog.Infof("Server shutdown complete")
 	}()
 
-	if cfg.UtreexoRootVerifyHeight > 0 {
-		verifyChan := make(chan bool)
-		server.StartUtreexoRootHintVerify(verifyChan)
-
-		verified := <-verifyChan
-		if verified {
-			fmt.Println("Utreexo root verified")
-		} else {
-			fmt.Println("Utreexo root invalid")
-		}
-		return nil
-	} else {
-		server.Start(nil)
-	}
 	if serverChan != nil {
 		serverChan <- server
 	}
@@ -495,7 +480,7 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	debug.SetGCPercent(50)
+	//debug.SetGCPercent(50)
 
 	//f, err := os.Create("trace.out")
 	//if err != nil {
@@ -503,7 +488,6 @@ func main() {
 	//	os.Exit(1)
 	//}
 	//trace.Start(f)
-	//runtime.MemProfileRate = 1
 
 	// Up some limits.
 	if err := limits.SetLimits(); err != nil {
@@ -530,4 +514,6 @@ func main() {
 		trace.Stop()
 		os.Exit(1)
 	}
+	//trace.Stop()
+	//f.Close()
 }
