@@ -1388,7 +1388,7 @@ type peerMsg struct {
 
 // inListen just listens and reads messages from peers. Must be run as a goroutine
 func (p *Peer) inListen(peerMsgchan chan peerMsg, idleTimer *time.Timer) {
-out:
+	//out:
 	for {
 		// Read a message and stop the idle timer as soon as the read
 		// is done.  The timer is reset below for the next iteration if
@@ -1396,36 +1396,37 @@ out:
 		rmsg, buf, err := p.readMessage(p.wireEncoding)
 		idleTimer.Stop()
 		if err != nil {
-			peerMsgchan <- peerMsg{err: err}
-			//// In order to allow regression tests with malformed messages, don't
-			//// disconnect the peer when we're in regression test mode and the
-			//// error is one of the allowed errors.
-			//if p.isAllowedReadError(err) {
-			//	log.Errorf("Allowed test error from %s: %v", p, err)
-			//	idleTimer.Reset(idleTimeout)
-			//	continue
-			//}
+			//peerMsgchan <- peerMsg{err: err}
+			// In order to allow regression tests with malformed messages, don't
+			// disconnect the peer when we're in regression test mode and the
+			// error is one of the allowed errors.
+			if p.isAllowedReadError(err) {
+				log.Errorf("Allowed test error from %s: %v", p, err)
+				idleTimer.Reset(idleTimeout)
+				continue
+			}
 
-			//// Only log the error and send reject message if the
-			//// local peer is not forcibly disconnecting and the
-			//// remote peer has not disconnected.
-			//if p.shouldHandleReadError(err) {
-			//	errMsg := fmt.Sprintf("Can't read message from %s: %v", p, err)
-			//	if err != io.ErrUnexpectedEOF {
-			//		log.Errorf(errMsg)
-			//	}
+			// Only log the error and send reject message if the
+			// local peer is not forcibly disconnecting and the
+			// remote peer has not disconnected.
+			if p.shouldHandleReadError(err) {
+				errMsg := fmt.Sprintf("Can't read message from %s: %v", p, err)
+				if err != io.ErrUnexpectedEOF {
+					log.Errorf(errMsg)
+				}
 
-			//	// Push a reject message for the malformed message and wait for
-			//	// the message to be sent before disconnecting.
-			//	//
-			//	// NOTE: Ideally this would include the command in the header if
-			//	// at least that much of the message was valid, but that is not
-			//	// currently exposed by wire, so just used malformed for the
-			//	// command.
-			//	p.PushRejectMsg("malformed", wire.RejectMalformed, errMsg, nil,
-			//		true)
-			//}
-			break out
+				// Push a reject message for the malformed message and wait for
+				// the message to be sent before disconnecting.
+				//
+				// NOTE: Ideally this would include the command in the header if
+				// at least that much of the message was valid, but that is not
+				// currently exposed by wire, so just used malformed for the
+				// command.
+				p.PushRejectMsg("malformed", wire.RejectMalformed, errMsg, nil,
+					true)
+			}
+			//break out
+			continue
 		}
 
 		peerMsgchan <- peerMsg{
@@ -1524,8 +1525,12 @@ out:
 			pmsg = rpmsg
 		}
 
-		rmsg := *pmsg.msg
-		buf := *pmsg.buf
+		var rmsg wire.Message
+		var buf []byte
+		if pmsg.msg != nil {
+			rmsg = *pmsg.msg
+			buf = *pmsg.buf
+		}
 
 		atomic.StoreInt64(&p.lastRecv, time.Now().Unix())
 		p.stallControl <- stallControlMsg{sccReceiveMessage, rmsg}

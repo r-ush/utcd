@@ -454,24 +454,21 @@ func NewRemoteWorker(num int8, hState *headerState) (*RemoteWorker, error) {
 func (rwrk *RemoteWorker) GetWork() {
 	// If we have this channel, we can have a blocking read
 	// while also listening for the quit signal
-out:
-	for {
-		msg, err := makeEmptyMessage(CmdGetWork)
-		if err != nil {
-			panic(err)
-		}
-		err = WriteWorkerMessage(rwrk.coordCon, msg)
-		if err != nil {
-			panic(err)
-		}
+	msg, err := makeEmptyMessage(CmdGetWork)
+	if err != nil {
+		panic(err)
+	}
+	err = WriteWorkerMessage(rwrk.coordCon, msg)
+	if err != nil {
+		panic(err)
+	}
 
-		select {
-		case work := <-rwrk.workChan:
-			rwrk.getWorkChan <- work
-			break
-		case <-rwrk.quit:
-			break out
-		}
+	select {
+	case work := <-rwrk.workChan:
+		rwrk.getWorkChan <- work
+		break
+	case <-rwrk.quit:
+		break
 	}
 }
 
@@ -681,7 +678,6 @@ func (rwrk *RemoteWorker) workHandler() {
 
 	rwrk.server.StartUtreexoRootHintVerify(rwrk.valChan)
 
-	go rwrk.GetWork()
 out:
 	for {
 
@@ -708,7 +704,7 @@ out:
 		btcdLog.Tracef("remote worker num %v queuing for work", rwrk.num)
 		btcdLog.Infof("remote worker num %v queuing for work", rwrk.num)
 
-		//rwrk.GetWork()
+		rwrk.GetWork()
 		// TODO receive work here
 		select {
 		case work, ok := <-rwrk.getWorkChan:
