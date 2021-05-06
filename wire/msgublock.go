@@ -76,11 +76,14 @@ func (msg *MsgUBlock) Command() string {
 
 // MaxPayloadLength returns the maximum length the payload can be for the
 // receiver.  This is part of the Message interface implementation.
+// TODO Re-check maxblock payload
 func (msg *MsgUBlock) MaxPayloadLength(pver uint32) uint32 {
 	// Block header at 80 bytes + transaction count + max transactions
 	// which can vary up to the MaxBlockPayload (including the block header
 	// and transaction count).
-	return MaxBlockPayload + 4000000
+	// Utreexo proof sizes may vary. Just have it at 4000000 for now
+	// TODO figure out maximum payload for proofs.
+	return MaxBlockPayload + 4000000 + 4000000
 }
 
 // NewMsgUBlock returns a new bitcoin block message that conforms to the

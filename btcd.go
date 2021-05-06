@@ -141,7 +141,6 @@ func rootWorkerStart(interrupt <-chan struct{}) error {
 		if cfg.MemProfile != "" {
 			memf, err := os.Create(cfg.MemProfile)
 			if err != nil {
-				fmt.Println(err)
 				btcdLog.Errorf("Unable to create mem profile: %v", err)
 				return
 			}
@@ -480,7 +479,7 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	//debug.SetGCPercent(50)
+	//debug.SetGCPercent(20)
 
 	//f, err := os.Create("trace.out")
 	//if err != nil {

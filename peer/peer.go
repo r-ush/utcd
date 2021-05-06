@@ -1446,92 +1446,44 @@ func (p *Peer) inHandler() {
 		p.Disconnect()
 	})
 
-	peerMsgChan := make(chan peerMsg, 10)
-	go p.inListen(peerMsgChan, idleTimer)
 out:
 	for atomic.LoadInt32(&p.disconnect) == 0 {
-		//// Read a message and stop the idle timer as soon as the read
-		//// is done.  The timer is reset below for the next iteration if
-		//// needed.
-		//rmsg, buf, err := p.readMessage(p.wireEncoding)
-		//idleTimer.Stop()
-		//if err != nil {
-		//	// In order to allow regression tests with malformed messages, don't
-		//	// disconnect the peer when we're in regression test mode and the
-		//	// error is one of the allowed errors.
-		//	if p.isAllowedReadError(err) {
-		//		log.Errorf("Allowed test error from %s: %v", p, err)
-		//		idleTimer.Reset(idleTimeout)
-		//		continue
-		//	}
-
-		//	// Only log the error and send reject message if the
-		//	// local peer is not forcibly disconnecting and the
-		//	// remote peer has not disconnected.
-		//	if p.shouldHandleReadError(err) {
-		//		errMsg := fmt.Sprintf("Can't read message from %s: %v", p, err)
-		//		if err != io.ErrUnexpectedEOF {
-		//			log.Errorf(errMsg)
-		//		}
-
-		//		// Push a reject message for the malformed message and wait for
-		//		// the message to be sent before disconnecting.
-		//		//
-		//		// NOTE: Ideally this would include the command in the header if
-		//		// at least that much of the message was valid, but that is not
-		//		// currently exposed by wire, so just used malformed for the
-		//		// command.
-		//		p.PushRejectMsg("malformed", wire.RejectMalformed, errMsg, nil,
-		//			true)
-		//	}
-		//	break out
-		//}
-
-		var pmsg peerMsg
-
-		select {
-		case rpmsg := <-peerMsgChan:
-			//idleTimer.Stop()
-			if rpmsg.err != nil {
-				// In order to allow regression tests with malformed messages, don't
-				// disconnect the peer when we're in regression test mode and the
-				// error is one of the allowed errors.
-				if p.isAllowedReadError(rpmsg.err) {
-					log.Errorf("Allowed test error from %s: %v", p, rpmsg.err)
-					idleTimer.Reset(idleTimeout)
-					continue
-				}
-
-				// Only log the error and send reject message if the
-				// local peer is not forcibly disconnecting and the
-				// remote peer has not disconnected.
-				if p.shouldHandleReadError(rpmsg.err) {
-					errMsg := fmt.Sprintf("Can't read message from %s: %v", p, rpmsg.err)
-					if rpmsg.err != io.ErrUnexpectedEOF {
-						log.Errorf(errMsg)
-					}
-
-					// Push a reject message for the malformed message and wait for
-					// the message to be sent before disconnecting.
-					//
-					// NOTE: Ideally this would include the command in the header if
-					// at least that much of the message was valid, but that is not
-					// currently exposed by wire, so just used malformed for the
-					// command.
-					p.PushRejectMsg("malformed", wire.RejectMalformed, errMsg, nil,
-						true)
-				}
+		// Read a message and stop the idle timer as soon as the read
+		// is done.  The timer is reset below for the next iteration if
+		// needed.
+		rmsg, buf, err := p.readMessage(p.wireEncoding)
+		idleTimer.Stop()
+		if err != nil {
+			// In order to allow regression tests with malformed messages, don't
+			// disconnect the peer when we're in regression test mode and the
+			// error is one of the allowed errors.
+			if p.isAllowedReadError(err) {
+				log.Errorf("Allowed test error from %s: %v", p, err)
+				idleTimer.Reset(idleTimeout)
+				continue
 			}
-			pmsg = rpmsg
-		}
 
-		var rmsg wire.Message
-		var buf []byte
-		if pmsg.msg != nil {
-			rmsg = *pmsg.msg
-			buf = *pmsg.buf
-		}
+			// Only log the error and send reject message if the
+			// local peer is not forcibly disconnecting and the
+			// remote peer has not disconnected.
+			if p.shouldHandleReadError(err) {
+				errMsg := fmt.Sprintf("Can't read message from %s: %v", p, err)
+				if err != io.ErrUnexpectedEOF {
+					log.Errorf(errMsg)
+				}
 
+				// Push a reject message for the malformed message and wait for
+				// the message to be sent before disconnecting.
+				//
+				// NOTE: Ideally this would include the command in the header if
+				// at least that much of the message was valid, but that is not
+				// currently exposed by wire, so just used malformed for the
+				// command.
+				p.PushRejectMsg("malformed", wire.RejectMalformed, errMsg, nil,
+					true)
+			}
+			break out
+		}
 		atomic.StoreInt64(&p.lastRecv, time.Now().Unix())
 		p.stallControl <- stallControlMsg{sccReceiveMessage, rmsg}
 
@@ -1908,6 +1860,7 @@ out:
 
 			err := p.writeMessage(msg.msg, msg.encoding)
 			if err != nil {
+				log.Warnf("outHandler err: %s", err)
 				p.Disconnect()
 				if p.shouldLogWriteError(err) {
 					log.Errorf("Failed to send message to "+

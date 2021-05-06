@@ -39,6 +39,7 @@ type Config struct {
 
 	UtreexoCSN            bool
 	UtreexoMN             bool
+	UtreexoWN             bool
 	UtreexoRootVerifyMode bool
 
 	FeeEstimator *mempool.FeeEstimator

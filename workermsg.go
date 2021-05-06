@@ -85,7 +85,15 @@ func WriteWorkerMessage(w io.Writer, msg WorkerMessage) error {
 
 	hdr := remoteWorkerMsgHeader{}
 	hdr.magic = MagicBytes
+
+	// Enforce max command size.
 	hdr.command = msg.Command()
+	if len(hdr.command) > int(CommandSize) {
+		err := fmt.Errorf("command [%s] is too long [max %v]",
+			hdr.command, CommandSize)
+		return err
+	}
+
 	hdr.length = uint32(lenp)
 
 	// Write header
@@ -104,14 +112,12 @@ func WriteWorkerMessage(w io.Writer, msg WorkerMessage) error {
 func ReadWorkerMessage(r io.Reader) (WorkerMessage, []byte, error) {
 	hdr, err := readWorkerMsgHeader(r)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ReadWorkerMessage %s",
-			err.Error())
+		return nil, nil, err
 	}
 	// Create struct of appropriate message type based on the command.
 	msg, err := makeEmptyMessage(hdr.command)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ReadWorkerMessage %s",
-			err.Error())
+		return nil, nil, err
 	}
 
 	// Read payload.
@@ -175,23 +181,6 @@ func (msg *MsgWork) Encode(w io.Writer) error {
 	binary.BigEndian.PutUint32(buf, uint32(msg.work.uRootHintHeight))
 	w.Write(buf)
 
-	//for _, header := range msg.work.startHeaders.headers {
-	//	// only writer matters. Other 2 fields don't do anything in the actual
-	//	// encoding function
-	//	err := header.BtcEncode(w, 0, wire.WitnessEncoding)
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//}
-
-	//for _, hash := range msg.work.startHeaders.hashes {
-	//	// only writer matters. Other 2 fields don't do anything in the actual
-	//	// encoding function
-	//	_, err := w.Write(hash[:])
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//}
 	return nil
 }
 
@@ -205,38 +194,6 @@ func (msg *MsgWork) Decode(r io.Reader) error {
 	work := work{}
 	work.uRootHintHeight = int32(binary.BigEndian.Uint32(heightBuf[:]))
 
-	//startH := startHeaders{
-	//	headers: make([]*wire.BlockHeader, 0, work.uRootHintHeight),
-	//	hashes:  make([]chainhash.Hash, work.uRootHintHeight),
-	//}
-
-	//for i := int32(0); i < work.uRootHintHeight; i++ {
-	//	header := wire.BlockHeader{}
-	//	// only reader matters. Other 2 fields don't do anything in the actual
-	//	// encoding function
-	//	err = header.BtcDecode(r, 0, wire.WitnessEncoding)
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	startH.headers = append(startH.headers, &header)
-	//}
-
-	//var hash [32]byte
-	//for i := int32(0); i < work.uRootHintHeight; i++ {
-	//	// only writer matters. Other 2 fields don't do anything in the actual
-	//	// encoding function
-	//	_, err := r.Read(hash[:])
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	hash, err := chainhash.NewHash(hash[:])
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	startH.hashes[i] = *hash
-	//}
-
-	//work.startHeaders = &startH
 	msg.work = &work
 
 	return nil
@@ -369,41 +326,13 @@ type MsgResult struct {
 }
 
 func (msg *MsgResult) Encode(w io.Writer) error {
-	//cmd := "Results"
-	//var command [CommandSize]byte
-	//copy(command[:], []byte(cmd))
-
-	//// Create header for the message.
-	//hdr := remoteWorkerMsgHeader{}
-	//hdr.magic = MagicBytes
-	//hdr.command = cmd
-
-	//if msg.result.valid {
-	//	w.Write([]byte{0x01})
-	//} else {
-	//	w.Write([]byte{0x00})
-	//}
 	w.Write(msg.result.valid[:])
 
 	err := binary.Write(w, binary.BigEndian, msg.result.uRootHintHeight)
 	if err != nil {
 		return err
 	}
-	//payload := bw.Bytes()
-	//hdr.length = uint32(len(payload))
 
-	//hw := bytes.NewBuffer(make([]byte, 0, HeaderSize))
-	//buf := make([]byte, 4)
-
-	//binary.BigEndian.PutUint32(buf, hdr.magic)
-	//hw.Write(buf)
-	//hw.Write(command[:])
-
-	//binary.BigEndian.PutUint32(buf, hdr.length)
-	//hw.Write(buf)
-
-	//rwrk.coordCon.Write(hw.Bytes())
-	//rwrk.coordCon.Write(payload)
 	return nil
 }
 

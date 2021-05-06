@@ -1153,7 +1153,7 @@ func (b *BlockChain) checkConnectBlock(node *blockNode, block *btcutil.Block, vi
 		// set to nil so that the scripts will be checked after this block
 		b.assumeValidHash = nil
 
-		log.Infof("Processed assumeValidHash at block %v"+
+		log.Infof("Processed assumeValidHash at block %v "+
 			"Checking signatures from this block on", node.hash)
 	} else {
 		if b.assumeValidHash == nil {

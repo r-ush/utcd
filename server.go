@@ -2833,7 +2833,6 @@ func (s *server) StartUtreexoRootHintVerify(uRootVerifyChan chan netsync.Process
 
 	// If the server is to verify a range of blocks based on the
 	// utreexo roots, only check those and exit
-	//srvrLog.Infof("Starting verification of the root: %v", utreexoRootToVerify.Height)
 	go s.uRootVerifyPeerHandler(uRootVerifyChan)
 }
 
@@ -3316,6 +3315,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		DisableCheckpoints:    cfg.DisableCheckpoints,
 		MaxPeers:              cfg.MaxPeers,
 		UtreexoMN:             cfg.UtreexoMainNode,
+		UtreexoWN:             cfg.UtreexoWorker,
 		UtreexoCSN:            cfg.UtreexoCSN,
 		UtreexoRootVerifyMode: utreexoRootVerifyMode,
 		FeeEstimator:          s.feeEstimator,

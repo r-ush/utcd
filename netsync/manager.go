@@ -355,8 +355,6 @@ func (sm *SyncManager) ValidateUtreexoRoot() error {
 			prevNodeEl := sm.headerList.Back()
 			prevNode := prevNodeEl.Value.(*HeaderNode)
 			if prevNode.Height >= rootToVerify.Height {
-				//log.Infof("Received %v block headers: Fetching blocks",
-				//	sm.headerList.Len())
 				sm.progressLogger.SetLastLogTime(time.Now())
 				sm.syncPeer = bestPeer
 
@@ -425,6 +423,7 @@ type SyncManager struct {
 
 	utreexoCSN            bool
 	utreexoMN             bool
+	utreexoWN             bool
 	utreexoRootVerifyMode bool
 	utreexoRootToVerify   *chaincfg.UtreexoRootHint
 	utreexoStartRoot      *chaincfg.UtreexoRootHint
@@ -451,15 +450,15 @@ func (sm *SyncManager) SetHeaderList(headers *list.List) {
 
 	e := sm.headerList.Front()
 	sm.startHeader = e
-
-	//hile := e.Next()
-	//hi := hile.Value.(*HeaderNode)
-	//fmt.Println(hi.Height, hi.Hash)
 }
 
 // resetHeaderState sets the headers-first mode state to values appropriate for
 // syncing from a new peer.
 func (sm *SyncManager) resetHeaderState(newestHash *chainhash.Hash, newestHeight int32) {
+	if sm.utreexoWN {
+		log.Infof("resetHeaderState not reseting as this node is a worker node")
+		return
+	}
 	sm.headersFirstMode = false
 	sm.headerList.Init()
 	sm.startHeader = nil
@@ -469,6 +468,15 @@ func (sm *SyncManager) resetHeaderState(newestHash *chainhash.Hash, newestHeight
 	// to prove it links to the chain properly.
 	if sm.nextCheckpoint != nil {
 		node := HeaderNode{Height: newestHeight, Hash: newestHash}
+		sm.headerList.PushBack(&node)
+	}
+
+	// if utreexo mainnode, reset headers
+	if sm.utreexoMN {
+		// Push back the genesis header to the headerList
+		best := sm.chain.BestSnapshot()
+		node := HeaderNode{Height: best.Height, Hash: &best.Hash}
+		sm.headerList = list.New()
 		sm.headerList.PushBack(&node)
 	}
 }
@@ -514,12 +522,19 @@ func (sm *SyncManager) startSync() {
 	// If we are verifying a utreexo root range, then call ValidateUtreexoRoot()
 	// and return. We keep a separate process for the root range verify
 	if sm.utreexoRootVerifyMode {
-		fmt.Println("sm.utreexoRootVerifyMode")
+		log.Infof("node in utreexoRootVerifyMode")
 		if sm.utreexoMN {
 			sm.ValidateUtreexoRoot()
 			return
 		}
-		if sm.utreexoRootToVerify != nil {
+
+		// if there's something we were verifying, continue verifying this
+		if len(sm.uTreeMap) > 0 {
+			for _, uRootHint := range sm.uTreeMap {
+				log.Infof("re-queuing uRootHint height at %d",
+					uRootHint.rootToVerify.Height)
+				sm.QueueURootHint(uRootHint.rootToVerify)
+			}
 		}
 		return
 	}
@@ -690,35 +705,6 @@ func (sm *SyncManager) isSyncCandidate(peer *peerpkg.Peer) bool {
 	return true
 }
 
-// handleParallelNewPeerMsg deals with new peers that have signalled they may
-// be considered as a sync peer (they have already successfully negotiated).  It
-// also starts syncing if needed.  It is invoked from the syncHandler goroutine.
-func (sm *SyncManager) handleParallelNewPeerMsg(peer *peerpkg.Peer) {
-	// Ignore if in the process of shutting down.
-	if atomic.LoadInt32(&sm.shutdown) != 0 {
-		return
-	}
-
-	log.Infof("New valid peer %s (%s)", peer, peer.UserAgent())
-
-	// Initialize the peer state
-	isSyncCandidate := sm.isSyncCandidate(peer)
-	sm.peerStates[peer] = &peerSyncState{
-		syncCandidate:   isSyncCandidate,
-		requestedTxns:   make(map[chainhash.Hash]struct{}),
-		requestedBlocks: make(map[chainhash.Hash]struct{}),
-	}
-
-	// Start syncing by choosing the best candidate if needed.
-	if isSyncCandidate && sm.syncPeer == nil {
-		if sm.newSyncNum == 0 {
-			close(sm.newSyncPeer)
-			sm.newSyncNum++
-		}
-		sm.startSync()
-	}
-}
-
 // handleNewPeerMsg deals with new peers that have signalled they may
 // be considered as a sync peer (they have already successfully negotiated).  It
 // also starts syncing if needed.  It is invoked from the syncHandler goroutine.
@@ -855,6 +841,7 @@ func (sm *SyncManager) updateSyncPeer(dcSyncPeer bool) {
 
 	// First, disconnect the current sync peer if requested.
 	if dcSyncPeer {
+		log.Tracef("updateSyncPeer. disconnect")
 		sm.syncPeer.Disconnect()
 	}
 
@@ -2441,13 +2428,6 @@ out:
 
 			case *ublockMsg:
 				go sm.uRootHandleUBlockMsg(msg)
-				//if done {
-				//	sm.utreexoRootToVerify = nil
-				//	verified <- ProcessedURootHint{
-				//		Validated:       verification,
-				//		URootHintHeight: height,
-				//	}
-				//}
 
 			case *invMsg:
 				sm.handleInvMsg(msg)
@@ -2459,7 +2439,6 @@ out:
 				sm.handleDonePeerMsg(msg.peer)
 
 			case ProcessedURootHint:
-				log.Infof("Processed hint at height %v", msg.URootHintHeight)
 				verified <- msg
 
 			case getSyncPeerMsg:
@@ -2574,6 +2553,7 @@ func (sm *SyncManager) uRootHandleUBlockMsg(ubmsg *ublockMsg) {
 	sm.uTreeMapLock.Unlock()
 
 	if ubmsg.ublock.Height() == uState.rootToVerify.Height {
+		delete(sm.uTreeMap, searchHeight)
 		if uState.uView.Equal(uState.rootToVerify.Roots) {
 			result := ProcessedURootHint{
 				Validated:       true,
@@ -2984,24 +2964,24 @@ func (sm *SyncManager) Pause() chan<- struct{} {
 // block, tx, and inv updates.
 func New(config *Config) (*SyncManager, error) {
 	sm := SyncManager{
-		peerNotifier:    config.PeerNotifier,
-		chain:           config.Chain,
-		txMemPool:       config.TxMemPool,
-		chainParams:     config.ChainParams,
-		rejectedTxns:    make(map[chainhash.Hash]struct{}),
-		requestedTxns:   make(map[chainhash.Hash]struct{}),
-		requestedBlocks: make(map[chainhash.Hash]struct{}),
-		peerStates:      make(map[*peerpkg.Peer]*peerSyncState),
-		uTreeMap:        make(map[int32]*uTreeState),
-		progressLogger:  newBlockProgressLogger("Processed", log),
-		//msgChan:               make(chan interface{}, config.MaxPeers*3),
-		msgChan:               make(chan interface{}, config.MaxPeers*1000),
+		peerNotifier:          config.PeerNotifier,
+		chain:                 config.Chain,
+		txMemPool:             config.TxMemPool,
+		chainParams:           config.ChainParams,
+		rejectedTxns:          make(map[chainhash.Hash]struct{}),
+		requestedTxns:         make(map[chainhash.Hash]struct{}),
+		requestedBlocks:       make(map[chainhash.Hash]struct{}),
+		peerStates:            make(map[*peerpkg.Peer]*peerSyncState),
+		uTreeMap:              make(map[int32]*uTreeState),
+		progressLogger:        newBlockProgressLogger("Processed", log),
+		msgChan:               make(chan interface{}, config.MaxPeers*3),
 		headerList:            list.New(),
 		quit:                  make(chan struct{}),
 		newSyncPeer:           make(chan struct{}),
 		feeEstimator:          config.FeeEstimator,
 		utreexoCSN:            config.UtreexoCSN,
 		utreexoMN:             config.UtreexoMN,
+		utreexoWN:             config.UtreexoWN,
 		utreexoRootVerifyMode: config.UtreexoRootVerifyMode,
 	}
 
