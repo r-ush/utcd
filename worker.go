@@ -731,7 +731,7 @@ out:
 		case work, ok := <-rwrk.getWorkChan:
 			if ok {
 				btcdLog.Infof("worker:%v received work for roothint at height:%v",
-					work.uRootHintHeight, rwrk.num)
+					rwrk.num, work.uRootHintHeight)
 
 				// Grab the rootHint for the provided height. If nil, then panic since the
 				// worker's rootHints are different from that of the main node
