@@ -44,6 +44,12 @@ github.com/jrick/logrotate v1.0.0 h1:lQ1bL/n9mBNeIXoTUoYRlK4dHuNJVofX9oWqBtPnSzI
 github.com/jrick/logrotate v1.0.0/go.mod h1:LNinyqDIJnpAur+b8yyulnQw/wDuN1+BYKlTRt3OuAQ=
 github.com/kcalvinalvin/utreexo v0.0.0-20210413154049-b5e783f48d4a h1:biP/Re3yuUiiAHDAdm4AK1fkmxO281eK3JziQ/9hzQY=
 github.com/kcalvinalvin/utreexo v0.0.0-20210413154049-b5e783f48d4a/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
+github.com/kcalvinalvin/utreexo v0.0.0-20210427070120-140929bbac96 h1:lVPHo1YpSB/EfuPgXz+HbEZsbgQ+1IW+3PxhoCy2rA8=
+github.com/kcalvinalvin/utreexo v0.0.0-20210427070120-140929bbac96/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
+github.com/kcalvinalvin/utreexo v0.0.0-20210428080818-1681d9dd3b36 h1:T0Y8oB7EPRGkULhNMrG19A0tcNQgE5f1XfZ/JrAwAjw=
+github.com/kcalvinalvin/utreexo v0.0.0-20210428080818-1681d9dd3b36/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
+github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034 h1:VhIMtYUYz/LEKvJzP9VdbvkkxPFFWpiw/PRN9HQX6Bw=
+github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23 h1:FOOIBWrEkLgmlgGfMuZT83xIwfPDxEI2OHu6xUmJMFE=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6CZQHDETBtE9HaSEkGmuNXF86RwHhHUvq4=
 github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498 h1:luTD6pTVYv5BMGuf+GkOCedIYZo9jMaA5USZULZCCvM=

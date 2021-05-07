@@ -1363,7 +1363,10 @@ func (b *BlockChain) createChainState() error {
 		// There are some extra data that needs to be created for utreexo bridge
 		// nodes.
 		if b.utreexo {
-			b.UtreexoBS = NewUtreexoBridgeState()
+			b.UtreexoBS, err = b.NewUtreexoBridgeState()
+			if err != nil {
+				return err
+			}
 			b.proofFileState = NewProofFileState()
 			b.proofFileState.InitProofFileState(filepath.Join(b.dataDir, "proof"))
 			_, err = meta.CreateBucket(txoTTLBucketName)
@@ -1480,7 +1483,7 @@ func (b *BlockChain) initChainState() error {
 
 	// If utreexo bridgenode is enabled, init the bridgenode related things
 	if b.utreexo {
-		b.UtreexoBS, err = RestoreUtreexoBridgeState(filepath.Join(b.dataDir, "bridge_data"))
+		b.UtreexoBS, err = b.RestoreUtreexoBridgeState(filepath.Join(b.dataDir, "bridge_data"))
 		if err != nil {
 			return err
 		}

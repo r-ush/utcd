@@ -19,5 +19,5 @@ require (
 go 1.15
 
 replace github.com/btcsuite/btcutil => github.com/mit-dci/utcutil v1.0.3-0.20210413154336-a1ad35fe261e
-replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20210413154049-b5e783f48d4a
+replace github.com/mit-dci/utreexo => github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034
 //replace github.com/piotrnar/gocoin => /home/calvin/bitcoin-projects/go/utreexo1/go/src/github.com/piotrnar/gocoin

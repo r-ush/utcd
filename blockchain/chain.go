@@ -134,8 +134,9 @@ type BlockChain struct {
 	// These fields are utreexo specific. Some fields are compact-state-node only
 	// and some are shared by both the
 	// bridgenode and the csn
-	utreexo   bool                // enable utreexo bridgenode
-	UtreexoBS *UtreexoBridgeState // state for bridgenodes
+	utreexo      bool                // enable utreexo bridgenode
+	utreexoInRam bool                // keep utreexo accumulators in ram or not
+	UtreexoBS    *UtreexoBridgeState // state for bridgenodes
 
 	// utreexoQuit this tells the chain to throw away any existing blocks it
 	// may have on memory to verify.
@@ -2210,6 +2211,10 @@ type Config struct {
 	// Utreexo enables the Utreexo bridgenode state.
 	Utreexo bool
 
+	// UtreexoInRam determines whether the entire accumulator is kept in
+	// ram or not
+	UtreexoInRam bool
+
 	// UtreexoCSN enables the utreexo compact state node.
 	UtreexoCSN bool
 
@@ -2298,6 +2303,7 @@ func New(config *Config) (*BlockChain, error) {
 		warningCaches:         newThresholdCaches(vbNumBits),
 		deploymentCaches:      newThresholdCaches(chaincfg.DefinedDeployments),
 		utreexo:               config.Utreexo,
+		utreexoInRam:          config.UtreexoInRam,
 		utreexoCSN:            config.UtreexoCSN,
 		utreexoLookAhead:      config.UtreexoLookAhead,
 		UtreexoRootVerifyMode: config.UtreexoRootVerifyMode,

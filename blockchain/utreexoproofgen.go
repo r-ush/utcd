@@ -31,28 +31,40 @@ type UtreexoBridgeState struct {
 
 // NewUtreexoBridgeState returns a utreexo accumulator state in ram
 // TODO: support on disk options
-func NewUtreexoBridgeState() *UtreexoBridgeState {
+func (b *BlockChain) NewUtreexoBridgeState() (*UtreexoBridgeState, error) {
+	var f *os.File
+	var err error
+
+	if !b.utreexoInRam {
+		utreexoBSPath := filepath.Join(b.dataDir, "bridge_data")
+		forestPath := filepath.Join(utreexoBSPath, "forestdata.dat")
+		f, err = os.OpenFile(forestPath, os.O_RDWR|os.O_CREATE, 0755)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Default to ram for now
 	return &UtreexoBridgeState{
-		forest: accumulator.NewForest(nil, false, "", 0),
-	}
+		forest: accumulator.NewForest(f, false, "", 0),
+	}, nil
 }
 
 // RestoreUtreexoBridgeState reads the utreexo bridgestate files on disk and returns
 // the initialized UtreexoBridgeState.
-func RestoreUtreexoBridgeState(utreexoBSPath string) (*UtreexoBridgeState, error) {
+func (b *BlockChain) RestoreUtreexoBridgeState(utreexoBSPath string) (*UtreexoBridgeState, error) {
 	miscPath := filepath.Join(utreexoBSPath, "miscforestfile.dat")
-	miscFile, err := os.Open(miscPath)
+	miscFile, err := os.OpenFile(miscPath, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, err
 	}
 	forestPath := filepath.Join(utreexoBSPath, "forestdata.dat")
-	fFile, err := os.Open(forestPath)
+	fFile, err := os.OpenFile(forestPath, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := accumulator.RestoreForest(miscFile, fFile, true, false, "", 0)
+	f, err := accumulator.RestoreForest(miscFile, fFile, b.utreexoInRam, false, "", 0)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +76,11 @@ func RestoreUtreexoBridgeState(utreexoBSPath string) (*UtreexoBridgeState, error
 func (b *BlockChain) WriteUtreexoBridgeState(utreexoBSPath string) error {
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
+
+	// don't save if it's already in disk
+	if !b.utreexoInRam {
+		return nil
+	}
 
 	// Tells connectBlock to not update the stateSnapshot
 	b.utreexoQuit = true

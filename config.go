@@ -168,6 +168,7 @@ type config struct {
 	SimNet               bool          `long:"simnet" description:"Use the simulation test network"`
 	TestNet3             bool          `long:"testnet" description:"Use the test network"`
 	Utreexo              bool          `long:"utreexo" description:"Serve Utreexo Proofs"`
+	UtreexoInRam         bool          `long:"utreexoinram" description:"Whether to keep the Utreexo accumulator in ram or not"`
 	UtreexoBSPath        string        `long:"utreexobspath" description:"Path for saving the Utreexo BridgeNode State"`
 	UtreexoCSN           bool          `long:"utreexocsn" description:"Enable Utreexo pruning"`
 	UtreexoLookAhead     int           `long:"utreexolookahead" description:"How many blocks ahead to cache for Utreexo"`
