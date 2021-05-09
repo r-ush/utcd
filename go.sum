@@ -52,6 +52,10 @@ github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034 h1:VhIMtYUYz/
 github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23 h1:FOOIBWrEkLgmlgGfMuZT83xIwfPDxEI2OHu6xUmJMFE=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6CZQHDETBtE9HaSEkGmuNXF86RwHhHUvq4=
+github.com/klauspost/cpuid/v2 v2.0.4 h1:g0I61F2K2DjRHz1cnxlkNSBIaePVoJIjjnHui8QHbiw=
+github.com/klauspost/cpuid/v2 v2.0.4/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
+github.com/minio/sha256-simd v1.0.0 h1:v1ta+49hkWZyvaKwrQB8elexRqm6Y0aMLjCNsrYxo6g=
+github.com/minio/sha256-simd v1.0.0/go.mod h1:OuYzVNI5vcoYIAmbIvHPl3N3jUzVedXbKy5RFepssQM=
 github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498 h1:luTD6pTVYv5BMGuf+GkOCedIYZo9jMaA5USZULZCCvM=
 github.com/mit-dci/utcutil v1.0.3-0.20210201144513-fb3ce8742498/go.mod h1:ST9y+SCOD6G6J48CwoMwtmQ+ATLrDuwS7rfZWNrsEPg=
 github.com/mit-dci/utcutil v1.0.3-0.20210413154336-a1ad35fe261e h1:C0YQJlkkVhHBpWzuLamFoc+y4WpQnR6GKsdoN3rlUAk=

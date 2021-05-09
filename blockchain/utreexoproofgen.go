@@ -37,6 +37,11 @@ func (b *BlockChain) NewUtreexoBridgeState() (*UtreexoBridgeState, error) {
 
 	if !b.utreexoInRam {
 		utreexoBSPath := filepath.Join(b.dataDir, "bridge_data")
+
+		// Check and make directory if it doesn't exist
+		if _, err := os.Stat(utreexoBSPath); os.IsNotExist(err) {
+			os.MkdirAll(utreexoBSPath, 0700)
+		}
 		forestPath := filepath.Join(utreexoBSPath, "forestdata.dat")
 		f, err = os.OpenFile(forestPath, os.O_RDWR|os.O_CREATE, 0755)
 		if err != nil {
