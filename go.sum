@@ -50,6 +50,8 @@ github.com/kcalvinalvin/utreexo v0.0.0-20210428080818-1681d9dd3b36 h1:T0Y8oB7EPR
 github.com/kcalvinalvin/utreexo v0.0.0-20210428080818-1681d9dd3b36/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
 github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034 h1:VhIMtYUYz/LEKvJzP9VdbvkkxPFFWpiw/PRN9HQX6Bw=
 github.com/kcalvinalvin/utreexo v0.0.0-20210507070429-9eb15d4d5034/go.mod h1:DqBS/7poVAdEy/SMFpczxIkFKOTLx0gODTmENOdZc74=
+github.com/kcalvinalvin/utreexo v0.0.0-20210509183109-a3d3cd2e3b33 h1:zBanUEs0s7pFhUKrJInCcZy9SVGwM1/UQ3gWQzH/L1k=
+github.com/kcalvinalvin/utreexo v0.0.0-20210509183109-a3d3cd2e3b33/go.mod h1:VT661aAyAEgj6LyMshAKRuoRbrP/HhsxLz7leg9t7RU=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23 h1:FOOIBWrEkLgmlgGfMuZT83xIwfPDxEI2OHu6xUmJMFE=
 github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6CZQHDETBtE9HaSEkGmuNXF86RwHhHUvq4=
 github.com/klauspost/cpuid/v2 v2.0.4 h1:g0I61F2K2DjRHz1cnxlkNSBIaePVoJIjjnHui8QHbiw=
