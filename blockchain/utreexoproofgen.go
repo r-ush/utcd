@@ -82,11 +82,6 @@ func (b *BlockChain) WriteUtreexoBridgeState(utreexoBSPath string) error {
 	b.chainLock.Lock()
 	defer b.chainLock.Unlock()
 
-	// don't save if it's already in disk
-	if !b.utreexoInRam {
-		return nil
-	}
-
 	// Tells connectBlock to not update the stateSnapshot
 	b.utreexoQuit = true
 
@@ -110,7 +105,7 @@ func (b *BlockChain) WriteUtreexoBridgeState(utreexoBSPath string) error {
 	if err != nil {
 		return err
 	}
-	err = b.UtreexoBS.forest.WriteForestToDisk(fFile, true, false)
+	err = b.UtreexoBS.forest.WriteForestToDisk(fFile, b.utreexoInRam, false)
 	if err != nil {
 		return err
 	}
