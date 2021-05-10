@@ -1929,37 +1929,51 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		hash = calcSignatureHash(subScript, hashType, &vm.tx, vm.txIdx)
 	}
 
-	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
-	if err != nil {
-		vm.dstack.PushBool(false)
-		return nil
-	}
-
-	var signature *btcec.Signature
-	if vm.hasFlag(ScriptVerifyStrictEncoding) ||
-		vm.hasFlag(ScriptVerifyDERSignatures) {
-
-		signature, err = btcec.ParseDERSignature(sigBytes, btcec.S256())
-	} else {
-		signature, err = btcec.ParseSignature(sigBytes, btcec.S256())
-	}
-	if err != nil {
-		vm.dstack.PushBool(false)
-		return nil
-	}
-
 	var valid bool
-	if vm.sigCache != nil {
-		var sigHash chainhash.Hash
-		copy(sigHash[:], hash)
+	if LibsecpAvailable {
+		if vm.sigCache != nil {
+			var sigHash chainhash.Hash
+			copy(sigHash[:], hash)
 
-		valid = vm.sigCache.Exists(sigHash, signature, pubKey)
-		if !valid && signature.Verify(hash, pubKey) {
-			vm.sigCache.Add(sigHash, signature, pubKey)
-			valid = true
+			valid = vm.sigCache.Exists(sigHash, sigBytes, pkBytes)
+			if !valid && btcec.LibsecpVerify(pkBytes, sigBytes, hash) {
+				vm.sigCache.Add(sigHash, sigBytes, pkBytes)
+				valid = true
+			}
+		} else {
+			valid = btcec.LibsecpVerify(pkBytes, sigBytes, hash)
 		}
 	} else {
-		valid = signature.Verify(hash, pubKey)
+		pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
+		if err != nil {
+			vm.dstack.PushBool(false)
+			return nil
+		}
+
+		var signature *btcec.Signature
+		if vm.hasFlag(ScriptVerifyStrictEncoding) ||
+			vm.hasFlag(ScriptVerifyDERSignatures) {
+
+			signature, err = btcec.ParseDERSignature(sigBytes, btcec.S256())
+		} else {
+			signature, err = btcec.ParseSignature(sigBytes, btcec.S256())
+		}
+		if err != nil {
+			vm.dstack.PushBool(false)
+			return nil
+		}
+		if vm.sigCache != nil {
+			var sigHash chainhash.Hash
+			copy(sigHash[:], hash)
+
+			valid = vm.sigCache.Exists(sigHash, sigBytes, pkBytes)
+			if !valid && signature.Verify(hash, pubKey) {
+				vm.sigCache.Add(sigHash, sigBytes, pkBytes)
+				valid = true
+			}
+		} else {
+			valid = signature.Verify(hash, pubKey)
+		}
 	}
 
 	if !valid && vm.hasFlag(ScriptVerifyNullFail) && len(sigBytes) > 0 {
@@ -2173,12 +2187,6 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 			return err
 		}
 
-		// Parse the pubkey.
-		parsedPubKey, err := btcec.ParsePubKey(pubKey, btcec.S256())
-		if err != nil {
-			continue
-		}
-
 		// Generate the signature hash based on the signature hash type.
 		var hash []byte
 		if vm.isWitnessVersionActive(0) {
@@ -2199,17 +2207,38 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 		}
 
 		var valid bool
-		if vm.sigCache != nil {
-			var sigHash chainhash.Hash
-			copy(sigHash[:], hash)
+		if LibsecpAvailable {
+			if vm.sigCache != nil {
+				var sigHash chainhash.Hash
+				copy(sigHash[:], hash)
 
-			valid = vm.sigCache.Exists(sigHash, parsedSig, parsedPubKey)
-			if !valid && parsedSig.Verify(hash, parsedPubKey) {
-				vm.sigCache.Add(sigHash, parsedSig, parsedPubKey)
-				valid = true
+				valid = vm.sigCache.Exists(sigHash, signature, pubKey)
+				if !valid && btcec.LibsecpVerify(pubKey, signature, hash) {
+					vm.sigCache.Add(sigHash, signature, pubKey)
+					valid = true
+				}
+			} else {
+				valid = btcec.LibsecpVerify(pubKey, signature, hash)
 			}
 		} else {
-			valid = parsedSig.Verify(hash, parsedPubKey)
+			// Parse the pubkey.
+			parsedPubKey, err := btcec.ParsePubKey(pubKey, btcec.S256())
+			if err != nil {
+				continue
+			}
+
+			if vm.sigCache != nil {
+				var sigHash chainhash.Hash
+				copy(sigHash[:], hash)
+
+				valid = vm.sigCache.Exists(sigHash, signature, pubKey)
+				if !valid && parsedSig.Verify(hash, parsedPubKey) {
+					vm.sigCache.Add(sigHash, signature, pubKey)
+					valid = true
+				}
+			} else {
+				valid = parsedSig.Verify(hash, parsedPubKey)
+			}
 		}
 
 		if valid {

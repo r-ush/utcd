@@ -5,9 +5,9 @@
 package txscript
 
 import (
+	"bytes"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
@@ -18,8 +18,7 @@ import (
 // match. In the occasion that two sigHashes collide, the newer sigHash will
 // simply overwrite the existing entry.
 type sigCacheEntry struct {
-	sig    *btcec.Signature
-	pubKey *btcec.PublicKey
+	sig, pubKey []byte
 }
 
 // SigCache implements an ECDSA signature verification cache with a randomized
@@ -55,12 +54,14 @@ func NewSigCache(maxEntries uint) *SigCache {
 //
 // NOTE: This function is safe for concurrent access. Readers won't be blocked
 // unless there exists a writer, adding an entry to the SigCache.
-func (s *SigCache) Exists(sigHash chainhash.Hash, sig *btcec.Signature, pubKey *btcec.PublicKey) bool {
+func (s *SigCache) Exists(sigHash chainhash.Hash, sig, pubKey []byte) bool {
 	s.RLock()
 	entry, ok := s.validSigs[sigHash]
 	s.RUnlock()
 
-	return ok && entry.pubKey.IsEqual(pubKey) && entry.sig.IsEqual(sig)
+	//return ok && entry.pubKey.IsEqual(pubKey) && entry.sig.IsEqual(sig)
+	return ok && bytes.Equal(entry.pubKey, pubKey) &&
+		bytes.Equal(entry.sig, sig)
 }
 
 // Add adds an entry for a signature over 'sigHash' under public key 'pubKey'
@@ -70,7 +71,7 @@ func (s *SigCache) Exists(sigHash chainhash.Hash, sig *btcec.Signature, pubKey *
 //
 // NOTE: This function is safe for concurrent access. Writers will block
 // simultaneous readers until function execution has concluded.
-func (s *SigCache) Add(sigHash chainhash.Hash, sig *btcec.Signature, pubKey *btcec.PublicKey) {
+func (s *SigCache) Add(sigHash chainhash.Hash, sig, pubKey []byte) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -95,5 +96,8 @@ func (s *SigCache) Add(sigHash chainhash.Hash, sig *btcec.Signature, pubKey *btc
 			break
 		}
 	}
-	s.validSigs[sigHash] = sigCacheEntry{sig, pubKey}
+	s.validSigs[sigHash] = sigCacheEntry{
+		sig:    sig,
+		pubKey: pubKey,
+	}
 }

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"hash"
 	"math/big"
+
+	"github.com/btcsuite/btcd/sipasec"
 )
 
 // Errors returned by canonicalPadding.
@@ -69,6 +71,16 @@ func (sig *Signature) Serialize() []byte {
 	b[offset+1] = byte(len(sb))
 	copy(b[offset+2:], sb)
 	return b
+}
+
+// LibsecpVerify calls the secp256k1 library to verify the signature of
+// hash using the public key.  It returns true if the signature is
+// valid, false otherwise.
+func LibsecpVerify(pubKey, sigBytes, hash []byte) bool {
+	if len(pubKey) == 0 || len(sigBytes) == 0 {
+		return false
+	}
+	return sipasec.ECVerify(pubKey, sigBytes, hash) == 1
 }
 
 // Verify calls ecdsa.Verify to verify the signature of hash using the public
