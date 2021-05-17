@@ -11,11 +11,29 @@ The current release is only a demo release and should be treated like so.
 
 ## Requirements
 
-[Go](http://golang.org) 1.14 or newer.
+[Go](http://golang.org) 1.15 or newer.
 
-## Installation
+## Build
+Without secp256k1:
+```bash
+env CGO_ENABLED=0 go build
+```
 
-Download from the releases tab on Github
+With secp256k1:
+```bash
+$ git submodule init
+$ git submodule update
+$ cd btcec/secp256k1
+$ ./autogen.sh
+$ ./configure --prefix=$PWD
+$ make all
+$ make check
+$ make install
+$ cd ../..
+$ go build
+```
+
+Basically just build the secp256k1 library with --prefix set to the btcec/secp256k1 directory and then `go build`.
 
 ## Getting Started
 
@@ -25,15 +43,28 @@ must modify/build from source.
 
 #### Linux/BSD/POSIX/Source
 
+1: Running a bridgenode
+
 ```bash
-$ ./btcd
+./btcd --utreexo
 ```
 
-## IRC
+2: Running a coordinator node
+
+```bash
+./btcd --utreexocsn --utreexomain --nolisten --norpc --blocksonly --connect=IP_OF_THE_BRIDGENODE
+```
+
+3: Running a coordinator node. Recommended to set --numworkers flag equal to that of the logical cores on your machine. --mainnodeip is also required if the coordinator node is on a remote machine.
+
+```bash
+./btcd --utreexocsn --utreexoworker --numworkers=1 --nolisten --nocfilters --norpc --blocksonly --connect=IP_OF_THE_BRIDGENODE --mainnodeip=IP_OF_THE_COORDINATOR_NODE
+```
+
+# IRC
 
 - irc.freenode.net
 - channel #utreexo
-- [webchat](https://webchat.freenode.net/?channels=btcd)
 
 ## License
 
