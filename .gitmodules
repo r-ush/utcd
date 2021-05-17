@@ -1,3 +1,3 @@
-[submodule "sipasec/secp256k1"]
-	path = sipasec/secp256k1
+[submodule "btcec/secp256k1"]
+	path = btcec/secp256k1
 	url = git@github.com:bitcoin-core/secp256k1.git

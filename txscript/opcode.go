@@ -1936,12 +1936,12 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 			copy(sigHash[:], hash)
 
 			valid = vm.sigCache.Exists(sigHash, sigBytes, pkBytes)
-			if !valid && btcec.LibsecpVerify(pkBytes, sigBytes, hash) {
+			if !valid && LibsecpVerify(pkBytes, sigBytes, hash) {
 				vm.sigCache.Add(sigHash, sigBytes, pkBytes)
 				valid = true
 			}
 		} else {
-			valid = btcec.LibsecpVerify(pkBytes, sigBytes, hash)
+			valid = LibsecpVerify(pkBytes, sigBytes, hash)
 		}
 	} else {
 		pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
@@ -2213,12 +2213,12 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 				copy(sigHash[:], hash)
 
 				valid = vm.sigCache.Exists(sigHash, signature, pubKey)
-				if !valid && btcec.LibsecpVerify(pubKey, signature, hash) {
+				if !valid && LibsecpVerify(pubKey, signature, hash) {
 					vm.sigCache.Add(sigHash, signature, pubKey)
 					valid = true
 				}
 			} else {
-				valid = btcec.LibsecpVerify(pubKey, signature, hash)
+				valid = LibsecpVerify(pubKey, signature, hash)
 			}
 		} else {
 			// Parse the pubkey.

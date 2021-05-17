@@ -1,4 +1,4 @@
-package sipasec
+package btcec
 
 /*
 #include <stdio.h>
@@ -141,7 +141,7 @@ static int ecdsa_signature_parse_der_lax(const secp256k1_context* ctx, secp256k1
 
 static int secp256k1_verify(unsigned char *msg, unsigned char *sig, int siglen, unsigned char *pk, int pklen) {
 	int result;
-    secp256k1_pubkey pubkey;
+        secp256k1_pubkey pubkey;
 	secp256k1_ecdsa_signature _sig;
 
 	if (!secp256k1_ec_pubkey_parse(ctx, &pubkey, pk, pklen)) {
@@ -158,9 +158,9 @@ static int secp256k1_verify(unsigned char *msg, unsigned char *sig, int siglen, 
 }
 
 */
-// #cgo LDFLAGS: ${SRCDIR}/secp256k1/lib/libsecp256k1.a
 // #cgo CFLAGS: -I./secp256k1
 // #cgo CFLAGS: -I./secp256k1/include
+// #cgo LDFLAGS: ${SRCDIR}/secp256k1/lib/libsecp256k1.a
 import "C"
 import "unsafe"
 
@@ -173,4 +173,6 @@ func ECVerify(pkey, sign, hash []byte) int {
 
 func init() {
 	C.secp256k1_start()
+	LibsecpAvailable = true
+	LibsecpVerify = ECVerify
 }

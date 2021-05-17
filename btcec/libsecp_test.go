@@ -1,7 +1,8 @@
-package sipasec
+package btcec
 
 import (
 	"encoding/hex"
+	"fmt"
 	"testing"
 )
 
@@ -54,29 +55,32 @@ var ta = [][3]string{
 }
 
 func TestVerify1(t *testing.T) {
+	if LibsecpVerify == nil {
+		return
+	}
 	for i := range ta {
 		pkey, _ := hex.DecodeString(ta[i][0])
 		sign, _ := hex.DecodeString(ta[i][1])
 		hasz, _ := hex.DecodeString(ta[i][2])
 
-		res := ECVerify(pkey, sign, hasz)
+		res := LibsecpVerify(pkey, sign, hasz)
 		if res != 1 {
 			t.Error("Verify failed")
 		}
 		hasz[0]++
-		res = ECVerify(pkey, sign, hasz)
+		res = LibsecpVerify(pkey, sign, hasz)
 		if res != 0 {
 			t.Error("Verify not failed while it should")
 		}
-		res = ECVerify(pkey[:1], sign, hasz)
+		res = LibsecpVerify(pkey[:1], sign, hasz)
 		if res >= 0 {
 			t.Error("Negative result expected", res)
 		}
-		res = ECVerify(pkey, sign[:1], hasz)
+		res = LibsecpVerify(pkey, sign[:1], hasz)
 		if res >= 0 {
 			t.Error("Yet negative result expected", res)
 		}
-		res = ECVerify(pkey, sign, hasz[:1])
+		res = LibsecpVerify(pkey, sign, hasz[:1])
 		if res != 0 {
 			t.Error("Zero expected", res)
 		}
@@ -85,21 +89,45 @@ func TestVerify1(t *testing.T) {
 }
 
 func BenchmarkVerifyUncompressed(b *testing.B) {
+	if LibsecpVerify == nil {
+		return
+	}
 	key, _ := hex.DecodeString("040eaebcd1df2df853d66ce0e1b0fda07f67d1cabefde98514aad795b86a6ea66dbeb26b67d7a00e2447baeccc8a4cef7cd3cad67376ac1c5785aeebb4f6441c16")
 	sig, _ := hex.DecodeString("3045022100fe00e013c244062847045ae7eb73b03fca583e9aa5dbd030a8fd1c6dfcf11b1002207d0d04fed8fa1e93007468d5a9e134b0a7023b6d31db4e50942d43a250f4d07c01")
 	msg, _ := hex.DecodeString("3382219555ddbb5b00e0090f469e590ba1eae03c7f28ab937de330aa60294ed6")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ECVerify(key, sig, msg)
+		LibsecpVerify(key, sig, msg)
 	}
 }
 
 func BenchmarkVerifyCompressed(b *testing.B) {
+	if LibsecpVerify == nil {
+		return
+	}
 	key_compr, _ := hex.DecodeString("020eaebcd1df2df853d66ce0e1b0fda07f67d1cabefde98514aad795b86a6ea66d")
 	sig, _ := hex.DecodeString("3045022100fe00e013c244062847045ae7eb73b03fca583e9aa5dbd030a8fd1c6dfcf11b1002207d0d04fed8fa1e93007468d5a9e134b0a7023b6d31db4e50942d43a250f4d07c01")
 	msg, _ := hex.DecodeString("3382219555ddbb5b00e0090f469e590ba1eae03c7f28ab937de330aa60294ed6")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ECVerify(key_compr, sig, msg)
+		LibsecpVerify(key_compr, sig, msg)
+	}
+}
+
+func verify() bool {
+	if LibsecpVerify == nil {
+		return false
+	}
+	key, _ := hex.DecodeString("020eaebcd1df2df853d66ce0e1b0fda07f67d1cabefde98514aad795b86a6ea66d")
+	sig, _ := hex.DecodeString("3045022100fe00e013c244062847045ae7eb73b03fca583e9aa5dbd030a8fd1c6dfcf11b1002207d0d04fed8fa1e93007468d5a9e134b0a7023b6d31db4e50942d43a250f4d07c01")
+	has, _ := hex.DecodeString("3382219555ddbb5b00e0090f469e590ba1eae03c7f28ab937de330aa60294ed6")
+	return LibsecpVerify(key, sig, has) == 1
+}
+
+func TestLibSecpAvailable(t *testing.T) {
+	if verify() {
+		fmt.Println("libsecp available.")
+	} else {
+		fmt.Println("libsecp not available. Falling back to btcec")
 	}
 }
