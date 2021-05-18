@@ -77,10 +77,9 @@ func TestPushedData(t *testing.T) {
 func TestHasCanonicalPush(t *testing.T) {
 	t.Parallel()
 
+	const scriptVersion = 0
 	for i := 0; i < 65535; i++ {
-		builder := NewScriptBuilder()
-		builder.AddInt64(int64(i))
-		script, err := builder.Script()
+		script, err := NewScriptBuilder().AddInt64(int64(i)).Script()
 		if err != nil {
 			t.Errorf("Script: test #%d unexpected error: %v\n", i, err)
 			continue
@@ -89,7 +88,7 @@ func TestHasCanonicalPush(t *testing.T) {
 			t.Errorf("IsPushOnlyScript: test #%d failed: %x\n", i, script)
 			continue
 		}
-		tokenizer := MakeScriptTokenizer(script)
+		tokenizer := MakeScriptTokenizer(scriptVersion, script)
 		for tokenizer.Next() {
 			if !isCanonicalPush(tokenizer.Opcode(), tokenizer.Data()) {
 				t.Errorf("isCanonicalPush: test #%d failed: %x\n", i, script)
@@ -109,7 +108,7 @@ func TestHasCanonicalPush(t *testing.T) {
 			t.Errorf("IsPushOnlyScript: test #%d failed: %x\n", i, script)
 			continue
 		}
-		tokenizer := MakeScriptTokenizer(script)
+		tokenizer := MakeScriptTokenizer(scriptVersion, script)
 		for tokenizer.Next() {
 			if !isCanonicalPush(tokenizer.Opcode(), tokenizer.Data()) {
 				t.Errorf("isCanonicalPush: test #%d failed: %x\n", i, script)
@@ -161,7 +160,7 @@ func TestGetPreciseSigOps(t *testing.T) {
 	pkScript := mustParseShortForm("HASH160 DATA_20 0x433ec2ac1ffa1b7b7d0" +
 		"27f564529c57197f9ae88 EQUAL")
 	for _, test := range tests {
-		count := GetPreciseSigOpCount(test.scriptSig, pkScript)
+		count := GetPreciseSigOpCount(test.scriptSig, pkScript, true)
 		if count != test.nSigOps {
 			t.Errorf("%s: expected count of %d, got %d", test.name,
 				test.nSigOps, count)
@@ -298,13 +297,29 @@ func TestRemoveOpcodes(t *testing.T) {
 			remove: OP_CODESEPARATOR,
 			after:  "CAT",
 		},
+		{
+			name:   "invalid length (instruction)",
+			before: "PUSHDATA1",
+			remove: OP_CODESEPARATOR,
+			err:    scriptError(ErrMalformedPush, ""),
+		},
+		{
+			name:   "invalid length (data)",
+			before: "PUSHDATA1 0xff 0xfe",
+			remove: OP_CODESEPARATOR,
+			err:    scriptError(ErrMalformedPush, ""),
+		},
 	}
 
 	// tstRemoveOpcode is a convenience function to parse the provided
 	// raw script, remove the passed opcode, then unparse the result back
 	// into a raw script.
+	const scriptVersion = 0
 	tstRemoveOpcode := func(script []byte, opcode byte) ([]byte, error) {
-		return removeOpcode(script, opcode), nil
+		if err := checkScriptParses(scriptVersion, script); err != nil {
+			return nil, err
+		}
+		return removeOpcodeRaw(script, opcode), nil
 	}
 
 	for _, test := range tests {
@@ -432,12 +447,28 @@ func TestRemoveOpcodeByData(t *testing.T) {
 			remove: []byte{1, 2, 3, 4},
 			after:  []byte{OP_UNKNOWN187},
 		},
+		{
+			name:   "invalid length (instruction)",
+			before: []byte{OP_PUSHDATA1},
+			remove: []byte{1, 2, 3, 4},
+			err:    scriptError(ErrMalformedPush, ""),
+		},
+		{
+			name:   "invalid length (data)",
+			before: []byte{OP_PUSHDATA1, 255, 254},
+			remove: []byte{1, 2, 3, 4},
+			err:    scriptError(ErrMalformedPush, ""),
+		},
 	}
 
-	// tstRemoveOpcodeByData is a convenience function to parse the provided
-	// raw script, remove the passed data, then unparse the result back
-	// into a raw script.
+	// tstRemoveOpcodeByData is a convenience function to ensure the provided
+	// script parses before attempting to remove the passed data.
+	const scriptVersion = 0
 	tstRemoveOpcodeByData := func(script []byte, data []byte) ([]byte, error) {
+		if err := checkScriptParses(scriptVersion, script); err != nil {
+			return nil, err
+		}
+
 		return removeOpcodeByData(script, data), nil
 	}
 
@@ -509,6 +540,7 @@ func TestIsPayToWitnessPubKeyHash(t *testing.T) {
 func TestHasCanonicalPushes(t *testing.T) {
 	t.Parallel()
 
+	const scriptVersion = 0
 	tests := []struct {
 		name     string
 		script   string
@@ -529,13 +561,13 @@ func TestHasCanonicalPushes(t *testing.T) {
 
 	for _, test := range tests {
 		script := mustParseShortForm(test.script)
-		if err := checkScriptParses(script); err != nil {
+		if err := checkScriptParses(scriptVersion, script); err != nil {
 			if test.expected {
 				t.Errorf("%q: script parse failed: %v", test.name, err)
 			}
 			continue
 		}
-		tokenizer := MakeScriptTokenizer(script)
+		tokenizer := MakeScriptTokenizer(scriptVersion, script)
 		for tokenizer.Next() {
 			result := isCanonicalPush(tokenizer.Opcode(), tokenizer.Data())
 			if result != test.expected {
@@ -591,6 +623,28 @@ func TestIsUnspendable(t *testing.T) {
 				0x97, 0xf0, 0xdc, 0xa7, 0xa4, 0x4d, 0xf6,
 				0xfa, 0x0b, 0x5c, 0x88, 0xac},
 			expected: false,
+		},
+		{
+			// Spendable
+			pkScript: []byte{0xa9, 0x14, 0x82, 0x1d, 0xba, 0x94, 0xbc, 0xfb,
+				0xa2, 0x57, 0x36, 0xa3, 0x9e, 0x5d, 0x14, 0x5d, 0x69, 0x75,
+				0xba, 0x8c, 0x0b, 0x42, 0x87},
+			expected: false,
+		},
+		{
+			// Not Necessarily Unspendable
+			pkScript: []byte{},
+			expected: false,
+		},
+		{
+			// Spendable
+			pkScript: []byte{OP_TRUE},
+			expected: false,
+		},
+		{
+			// Unspendable
+			pkScript: []byte{OP_RETURN},
+			expected: true,
 		},
 	}
 

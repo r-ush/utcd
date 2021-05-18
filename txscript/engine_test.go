@@ -1,4 +1,5 @@
 // Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2015-2019 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -22,26 +23,29 @@ func TestBadPC(t *testing.T) {
 		{scriptIdx: 2},
 		{scriptIdx: 3},
 	}
+
 	// tx with almost empty scripts.
 	tx := &wire.MsgTx{
 		Version: 1,
-		TxIn: []*wire.TxIn{{
-			PreviousOutPoint: wire.OutPoint{
-				Hash: chainhash.Hash([32]byte{
-					0xc9, 0x97, 0xa5, 0xe5,
-					0x6e, 0x10, 0x41, 0x02,
-					0xfa, 0x20, 0x9c, 0x6a,
-					0x85, 0x2d, 0xd9, 0x06,
-					0x60, 0xa2, 0x0b, 0x2d,
-					0x9c, 0x35, 0x24, 0x23,
-					0xed, 0xce, 0x25, 0x85,
-					0x7f, 0xcd, 0x37, 0x04,
-				}),
-				Index: 0,
+		TxIn: []*wire.TxIn{
+			{
+				PreviousOutPoint: wire.OutPoint{
+					Hash: chainhash.Hash([32]byte{
+						0xc9, 0x97, 0xa5, 0xe5,
+						0x6e, 0x10, 0x41, 0x02,
+						0xfa, 0x20, 0x9c, 0x6a,
+						0x85, 0x2d, 0xd9, 0x06,
+						0x60, 0xa2, 0x0b, 0x2d,
+						0x9c, 0x35, 0x24, 0x23,
+						0xed, 0xce, 0x25, 0x85,
+						0x7f, 0xcd, 0x37, 0x04,
+					}),
+					Index: 0,
+				},
+				SignatureScript: mustParseShortForm("NOP"),
+				Sequence:        4294967295,
 			},
-			SignatureScript: mustParseShortForm("NOP"),
-			Sequence:        4294967295,
-		}},
+		},
 		TxOut: []*wire.TxOut{{
 			Value:    1000000000,
 			PkScript: nil,

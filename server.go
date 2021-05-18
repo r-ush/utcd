@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -206,6 +205,9 @@ type server struct {
 	shutdown      int32
 	shutdownSched int32
 	startupTime   int64
+
+	msgBlockSizeSent uint64
+	udataSizeSent    uint64
 
 	chainParams          *chaincfg.Params
 	addrManager          *addrmgr.AddrManager
@@ -1696,6 +1698,7 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	err := sp.server.db.View(func(dbTx database.Tx) error {
 		var err error
 		blockBytes, err = dbTx.FetchBlock(hash)
+
 		return err
 	})
 	if err != nil {
@@ -1721,9 +1724,7 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 		return err
 	}
 
-	// Fetch the utreexo proof
-	var ud *btcacc.UData
-	ud, err = s.chain.FetchProof(hash)
+	height, err := s.chain.LookupNode(hash)
 	if err != nil {
 		peerLog.Tracef("Unable to fetch requested block proof %v: %v",
 			hash, err)
@@ -1734,22 +1735,24 @@ func (s *server) pushUBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 		return err
 	}
 
-	// Fetch the time-to-live value for the block
-	var ttls []int32
-	err = sp.server.db.View(func(dbTx database.Tx) error {
-		ttls, err = blockchain.FetchOnlyTTL(dbTx, hash)
-		return err
-	})
+	// Fetch the utreexo proof
+	var ud *btcacc.UData
+	ud, err = s.chain.FetchProof(height)
 	if err != nil {
-		peerLog.Tracef("Unable to fetch ttl for the requested block hash "+
-			"%v: %v", hash, err)
+		peerLog.Tracef("Unable to fetch requested block proof %v: %v",
+			hash, err)
+
 		if doneChan != nil {
 			doneChan <- struct{}{}
 		}
-
 		return err
 	}
-	ud.TxoTTLs = ttls
+
+	//udSize := uint64(ud.SerializeSizeVarInt())
+	//msgBlockSize := uint64(msgBlock.SerializeSize())
+
+	//atomic.AddUint64(&s.udataSizeSent, udSize)
+	//atomic.AddUint64(&s.msgBlockSizeSent, msgBlockSize)
 
 	// Create ublock
 	ublock := wire.MsgUBlock{
@@ -2356,7 +2359,7 @@ func (s *server) peerDoneHandler(sp *serverPeer) {
 // peerHandler is used to handle peer operations such as adding and removing
 // peers to and from the server, banning peers, and broadcasting messages to
 // peers.  It must be run in a goroutine.
-func (s *server) peerHandler() {
+func (s *server) peerHandler(utreexoRootToVerify *chaincfg.UtreexoRootHint) {
 	// Start the address manager and sync manager, both of which are needed
 	// by peers.  This is done here since their lifecycle is closely tied
 	// to this handler and rather than adding more channels to sychronize
@@ -2364,6 +2367,200 @@ func (s *server) peerHandler() {
 	// in this handler.
 	s.addrManager.Start()
 	s.syncManager.Start()
+
+	srvrLog.Tracef("Starting peer handler")
+
+	state := &peerState{
+		inboundPeers:    make(map[int32]*serverPeer),
+		persistentPeers: make(map[int32]*serverPeer),
+		outboundPeers:   make(map[int32]*serverPeer),
+		banned:          make(map[string]time.Time),
+		outboundGroups:  make(map[string]int),
+	}
+
+	if !cfg.DisableDNSSeed {
+		// Add peers discovered through DNS to the address manager.
+		connmgr.SeedFromDNS(activeNetParams.Params, defaultRequiredServices,
+			btcdLookup, func(addrs []*wire.NetAddress) {
+				// Bitcoind uses a lookup of the dns seeder here. This
+				// is rather strange since the values looked up by the
+				// DNS seed lookups will vary quite a lot.
+				// to replicate this behaviour we put all addresses as
+				// having come from the first one.
+				s.addrManager.AddAddresses(addrs, addrs[0])
+			})
+	}
+	go s.connManager.Start()
+
+out:
+	for {
+		select {
+		// New peers connected to the server.
+		case p := <-s.newPeers:
+			s.handleAddPeerMsg(state, p)
+
+		// Disconnected peers.
+		case p := <-s.donePeers:
+			s.handleDonePeerMsg(state, p)
+
+		// Block accepted in mainchain or orphan, update peer height.
+		case umsg := <-s.peerHeightsUpdate:
+			s.handleUpdatePeerHeights(state, umsg)
+
+		// Peer to ban.
+		case p := <-s.banPeers:
+			s.handleBanPeerMsg(state, p)
+
+		// New inventory to potentially be relayed to other peers.
+		case invMsg := <-s.relayInv:
+			s.handleRelayInvMsg(state, invMsg)
+
+		// Message to broadcast to all connected peers except those
+		// which are excluded by the message.
+		case bmsg := <-s.broadcast:
+			s.handleBroadcastMsg(state, &bmsg)
+
+		case qmsg := <-s.query:
+			s.handleQuery(state, qmsg)
+
+		case <-s.quit:
+			// Disconnect all peers on server shutdown.
+			state.forAllPeers(func(sp *serverPeer) {
+				srvrLog.Tracef("Shutdown peer %s", sp)
+				sp.Disconnect()
+			})
+			break out
+		}
+	}
+
+	s.connManager.Stop()
+	s.syncManager.Stop()
+	s.addrManager.Stop()
+
+	// Drain channels before exiting so nothing is left waiting around
+	// to send.
+cleanup:
+	for {
+		select {
+		case <-s.newPeers:
+		case <-s.donePeers:
+		case <-s.peerHeightsUpdate:
+		case <-s.relayInv:
+		case <-s.broadcast:
+		case <-s.query:
+		default:
+			break cleanup
+		}
+	}
+	s.wg.Done()
+	srvrLog.Tracef("Peer handler done")
+}
+
+func (s *server) headerDownloadPeerHandler(utreexoRootToVerify *chaincfg.UtreexoRootHint, doneChan chan struct{}) {
+	// Start the address manager and sync manager, both of which are needed
+	// by peers.  This is done here since their lifecycle is closely tied
+	// to this handler and rather than adding more channels to sychronize
+	// things, it's easier and slightly faster to simply start and stop them
+	// in this handler.
+	s.addrManager.Start()
+	s.syncManager.StartHeadersDownload(utreexoRootToVerify, doneChan)
+
+	srvrLog.Tracef("Starting peer handler")
+
+	state := &peerState{
+		inboundPeers:    make(map[int32]*serverPeer),
+		persistentPeers: make(map[int32]*serverPeer),
+		outboundPeers:   make(map[int32]*serverPeer),
+		banned:          make(map[string]time.Time),
+		outboundGroups:  make(map[string]int),
+	}
+
+	if !cfg.DisableDNSSeed {
+		// Add peers discovered through DNS to the address manager.
+		connmgr.SeedFromDNS(activeNetParams.Params, defaultRequiredServices,
+			btcdLookup, func(addrs []*wire.NetAddress) {
+				// Bitcoind uses a lookup of the dns seeder here. This
+				// is rather strange since the values looked up by the
+				// DNS seed lookups will vary quite a lot.
+				// to replicate this behaviour we put all addresses as
+				// having come from the first one.
+				s.addrManager.AddAddresses(addrs, addrs[0])
+			})
+	}
+	go s.connManager.Start()
+
+out:
+	for {
+		select {
+		// New peers connected to the server.
+		case p := <-s.newPeers:
+			s.handleAddPeerMsg(state, p)
+
+		// Disconnected peers.
+		case p := <-s.donePeers:
+			s.handleDonePeerMsg(state, p)
+
+		// Block accepted in mainchain or orphan, update peer height.
+		case umsg := <-s.peerHeightsUpdate:
+			s.handleUpdatePeerHeights(state, umsg)
+
+		// Peer to ban.
+		case p := <-s.banPeers:
+			s.handleBanPeerMsg(state, p)
+
+		// New inventory to potentially be relayed to other peers.
+		case invMsg := <-s.relayInv:
+			s.handleRelayInvMsg(state, invMsg)
+
+		// Message to broadcast to all connected peers except those
+		// which are excluded by the message.
+		case bmsg := <-s.broadcast:
+			s.handleBroadcastMsg(state, &bmsg)
+
+		case qmsg := <-s.query:
+			s.handleQuery(state, qmsg)
+
+		case <-s.quit:
+			// Disconnect all peers on server shutdown.
+			state.forAllPeers(func(sp *serverPeer) {
+				srvrLog.Tracef("Shutdown peer %s", sp)
+				sp.Disconnect()
+			})
+			break out
+		}
+	}
+
+	s.connManager.Stop()
+	s.syncManager.Stop()
+	s.addrManager.Stop()
+
+	// Drain channels before exiting so nothing is left waiting around
+	// to send.
+cleanup:
+	for {
+		select {
+		case <-s.newPeers:
+		case <-s.donePeers:
+		case <-s.peerHeightsUpdate:
+		case <-s.relayInv:
+		case <-s.broadcast:
+		case <-s.query:
+		default:
+			break cleanup
+		}
+	}
+	s.wg.Done()
+	srvrLog.Tracef("Peer handler done")
+}
+
+func (s *server) uRootVerifyPeerHandler(uRootVerifyChan chan netsync.ProcessedURootHint) {
+	// Start the address manager and sync manager, both of which are needed
+	// by peers.  This is done here since their lifecycle is closely tied
+	// to this handler and rather than adding more channels to sychronize
+	// things, it's easier and slightly faster to simply start and stop them
+	// in this handler.
+	s.addrManager.Start()
+	s.syncManager.StartUtreexoRootHintVerify(uRootVerifyChan)
 
 	srvrLog.Tracef("Starting peer handler")
 
@@ -2583,13 +2780,11 @@ cleanup:
 }
 
 // Start begins accepting connections from peers.
-func (s *server) Start() {
+func (s *server) Start(utreexoRootToVerify *chaincfg.UtreexoRootHint) {
 	// Already started?
 	if atomic.AddInt32(&s.started, 1) != 1 {
 		return
 	}
-
-	srvrLog.Trace("Starting server")
 
 	// Server startup time. Used for the uptime command for uptime calculation.
 	s.startupTime = time.Now().Unix()
@@ -2597,7 +2792,9 @@ func (s *server) Start() {
 	// Start the peer handler which in turn starts the address and block
 	// managers.
 	s.wg.Add(1)
-	go s.peerHandler()
+
+	srvrLog.Trace("Starting server")
+	go s.peerHandler(nil)
 
 	if s.nat != nil {
 		s.wg.Add(1)
@@ -2620,6 +2817,46 @@ func (s *server) Start() {
 	}
 }
 
+// Start begins accepting connections from peers.
+func (s *server) StartUtreexoRootHintVerify(uRootVerifyChan chan netsync.ProcessedURootHint) {
+	// Already started?
+	if atomic.AddInt32(&s.started, 1) != 1 {
+		return
+	}
+
+	// Server startup time. Used for the uptime command for uptime calculation.
+	s.startupTime = time.Now().Unix()
+
+	// Start the peer handler which in turn starts the address and block
+	// managers.
+	s.wg.Add(1)
+
+	// If the server is to verify a range of blocks based on the
+	// utreexo roots, only check those and exit
+	go s.uRootVerifyPeerHandler(uRootVerifyChan)
+}
+
+// Start begins accepting connections from peers.
+func (s *server) StartHeadersDownload(utreexoRootToVerify *chaincfg.UtreexoRootHint, doneChan chan struct{}) {
+	// Already started?
+	if atomic.AddInt32(&s.started, 1) != 1 {
+		return
+	}
+
+	// Server startup time. Used for the uptime command for uptime calculation.
+	s.startupTime = time.Now().Unix()
+
+	// Start the peer handler which in turn starts the address and block
+	// managers.
+	s.wg.Add(1)
+
+	// If the server is to verify a range of blocks based on the
+	// utreexo roots, only check those and exit
+	srvrLog.Infof("Starting headers download to height: %v",
+		utreexoRootToVerify.Height)
+	go s.headerDownloadPeerHandler(utreexoRootToVerify, doneChan)
+}
+
 // Stop gracefully shuts down the server by stopping and disconnecting all
 // peers and the main listener.
 func (s *server) Stop() error {
@@ -2628,6 +2865,9 @@ func (s *server) Stop() error {
 		srvrLog.Infof("Server is already in the process of shutting down")
 		return nil
 	}
+
+	srvrLog.Infof("msgBlockSizeSent is %d. udataSizeSent is %d",
+		s.msgBlockSizeSent, s.udataSizeSent)
 
 	srvrLog.Warnf("Server shutting down")
 
@@ -2639,13 +2879,16 @@ func (s *server) Stop() error {
 		s.rpcServer.Stop()
 	}
 
-	// Save fee estimator state in the database.
-	s.db.Update(func(tx database.Tx) error {
-		metadata := tx.Metadata()
-		metadata.Put(mempool.EstimateFeeDatabaseKey, s.feeEstimator.Save())
+	// Only access the database if we're not in the utreexo root verify mode
+	if s.chain.UtreexoRootBeingVerified() == nil && !cfg.UtreexoWorker && !cfg.UtreexoMainNode {
+		// Save fee estimator state in the database.
+		s.db.Update(func(tx database.Tx) error {
+			metadata := tx.Metadata()
+			metadata.Put(mempool.EstimateFeeDatabaseKey, s.feeEstimator.Save())
 
-		return nil
-	})
+			return nil
+		})
+	}
 
 	// Signal the remaining goroutines to quit.
 	close(s.quit)
@@ -2864,6 +3107,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.Utreexo {
 		indxLog.Info("set utreexo bridge service")
 		services |= wire.SFNodeUtreexo
+		services |= wire.SFNodeNetwork
 	}
 	if cfg.UtreexoCSN {
 		indxLog.Info("set utreexoCSN")
@@ -2908,7 +3152,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		db:                   db,
 		timeSource:           blockchain.NewMedianTime(),
 		services:             services,
-		sigCache:             txscript.NewSigCache(cfg.SigCacheMaxSize),
+		sigCache:             txscript.NewSigCache(0),
 		hashCache:            txscript.NewHashCache(cfg.SigCacheMaxSize),
 		cfCheckptCaches:      make(map[wire.FilterType][]cfHeaderKV),
 		agentBlacklist:       agentBlacklist,
@@ -2942,7 +3186,6 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		indexes = append(indexes, s.addrIndex)
 	}
 	// Don't serve cfilters by default for utreexo
-	// NOTE remove for PR
 	if false {
 		indxLog.Info("Committed filter index is enabled")
 		s.cfIndex = indexers.NewCfIndex(db, chainParams)
@@ -2961,49 +3204,74 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		checkpoints = mergeCheckpoints(s.chainParams.Checkpoints, cfg.addCheckpoints)
 	}
 
+	// Set assumevalid. If assumevalid was turned off, the assumevalidhash will be nil
+	var assumevalidHash *chainhash.Hash
+	if !cfg.NoAssumeValid {
+		assumevalidHash = s.chainParams.AssumeValid
+		btcdLog.Infof("Setting assumevalidHash to %s", s.chainParams.AssumeValid.String())
+	} else {
+		btcdLog.Infof("No assumevalidHash set. Checking all signatures")
+	}
+
+	var utreexoRootToVerify *chaincfg.UtreexoRootHint
+
+	var utreexoRootVerifyMode bool
+	if cfg.UtreexoWorker || cfg.UtreexoMainNode {
+		utreexoRootVerifyMode = true
+	}
+
 	// Create a new block chain instance with the appropriate configuration.
 	var err error
 	s.chain, err = blockchain.New(&blockchain.Config{
-		DB:               s.db,
-		Interrupt:        interrupt,
-		ChainParams:      s.chainParams,
-		Checkpoints:      checkpoints,
-		TimeSource:       s.timeSource,
-		SigCache:         s.sigCache,
-		IndexManager:     indexManager,
-		HashCache:        s.hashCache,
-		Utreexo:          cfg.Utreexo,
-		UtreexoBSPath:    filepath.Join(cfg.DataDir, "bridge_data"),
-		DataDir:          cfg.DataDir,
-		UtreexoCSN:       cfg.UtreexoCSN,
-		UtreexoLookAhead: cfg.UtreexoLookAhead,
-		TTL:              cfg.TTL,
+		DB:                    s.db,
+		UtxoCacheMaxSize:      uint64(cfg.UtxoCacheMaxSizeMiB) * 1024 * 1024,
+		Interrupt:             interrupt,
+		ChainParams:           s.chainParams,
+		Checkpoints:           checkpoints,
+		TimeSource:            s.timeSource,
+		SigCache:              s.sigCache,
+		IndexManager:          indexManager,
+		HashCache:             s.hashCache,
+		Utreexo:               cfg.Utreexo,
+		UtreexoInRam:          cfg.UtreexoInRam,
+		DataDir:               cfg.DataDir,
+		UtreexoCSN:            cfg.UtreexoCSN,
+		UtreexoLookAhead:      cfg.UtreexoLookAhead,
+		TTL:                   cfg.TTL,
+		UtreexoRootToVerify:   utreexoRootToVerify,
+		UtreexoRootVerifyMode: utreexoRootVerifyMode,
+		UtreexoRootHints:      s.chainParams.UtreexoRootHints,
+		AssumeValidHash:       assumevalidHash,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Search for a FeeEstimator state in the database. If none can be found
-	// or if it cannot be loaded, create a new one.
-	db.Update(func(tx database.Tx) error {
-		metadata := tx.Metadata()
-		feeEstimationData := metadata.Get(mempool.EstimateFeeDatabaseKey)
-		if feeEstimationData != nil {
-			// delete it from the database so that we don't try to restore the
-			// same thing again somehow.
-			metadata.Delete(mempool.EstimateFeeDatabaseKey)
+	fmt.Println("cfg.UtreexoWorker", cfg.UtreexoWorker)
+	// Only access the database if we're not in utreexo root verify mode
+	if utreexoRootToVerify == nil && !cfg.UtreexoWorker && !cfg.UtreexoMainNode {
+		// Search for a FeeEstimator state in the database. If none can be found
+		// or if it cannot be loaded, create a new one.
+		db.Update(func(tx database.Tx) error {
+			metadata := tx.Metadata()
+			feeEstimationData := metadata.Get(mempool.EstimateFeeDatabaseKey)
+			if feeEstimationData != nil {
+				// delete it from the database so that we don't try to restore the
+				// same thing again somehow.
+				metadata.Delete(mempool.EstimateFeeDatabaseKey)
 
-			// If there is an error, log it and make a new fee estimator.
-			var err error
-			s.feeEstimator, err = mempool.RestoreFeeEstimator(feeEstimationData)
+				// If there is an error, log it and make a new fee estimator.
+				var err error
+				s.feeEstimator, err = mempool.RestoreFeeEstimator(feeEstimationData)
 
-			if err != nil {
-				peerLog.Errorf("Failed to restore fee estimator %v", err)
+				if err != nil {
+					peerLog.Errorf("Failed to restore fee estimator %v", err)
+				}
 			}
-		}
 
-		return nil
-	})
+			return nil
+		})
+	}
 
 	// If no feeEstimator has been found, or if the one that has been found
 	// is behind somehow, create a new one and start over.
@@ -3041,14 +3309,17 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	s.txMemPool = mempool.New(&txC)
 
 	s.syncManager, err = netsync.New(&netsync.Config{
-		PeerNotifier:       &s,
-		Chain:              s.chain,
-		TxMemPool:          s.txMemPool,
-		ChainParams:        s.chainParams,
-		DisableCheckpoints: cfg.DisableCheckpoints,
-		MaxPeers:           cfg.MaxPeers,
-		UtreexoCSN:         cfg.UtreexoCSN,
-		FeeEstimator:       s.feeEstimator,
+		PeerNotifier:          &s,
+		Chain:                 s.chain,
+		TxMemPool:             s.txMemPool,
+		ChainParams:           s.chainParams,
+		DisableCheckpoints:    cfg.DisableCheckpoints,
+		MaxPeers:              cfg.MaxPeers,
+		UtreexoMN:             cfg.UtreexoMainNode,
+		UtreexoWN:             cfg.UtreexoWorker,
+		UtreexoCSN:            cfg.UtreexoCSN,
+		UtreexoRootVerifyMode: utreexoRootVerifyMode,
+		FeeEstimator:          s.feeEstimator,
 	})
 	if err != nil {
 		return nil, err

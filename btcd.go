@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"runtime/pprof"
 	"runtime/trace"
 
@@ -34,6 +33,124 @@ var (
 // winServiceMain is only invoked on Windows.  It detects when btcd is running
 // as a service and reacts accordingly.
 var winServiceMain func() (bool, error)
+
+func rootMainNodeStart(interrupt <-chan struct{}) error {
+	// Enable http profiling server if requested.
+	if cfg.Profile != "" {
+		go func() {
+			listenAddr := net.JoinHostPort("", cfg.Profile)
+			btcdLog.Infof("Profile server listening on %s", listenAddr)
+			profileRedirect := http.RedirectHandler("/debug/pprof",
+				http.StatusSeeOther)
+			http.Handle("/", profileRedirect)
+			btcdLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
+		}()
+	}
+
+	// Write cpu profile if requested.
+	if cfg.CPUProfile != "" {
+		f, err := os.Create(cfg.CPUProfile)
+		if err != nil {
+			fmt.Println(err)
+			btcdLog.Errorf("Unable to create cpu profile: %v", err)
+			return err
+		}
+		pprof.StartCPUProfile(f)
+		defer f.Close()
+		defer pprof.StopCPUProfile()
+	}
+
+	//mainNode, err := initMainNode(activeNetParams.Params, int32(runtime.NumCPU()*2))
+	mainNode, err := initMainNode(activeNetParams.Params, 0)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	mainNode.Start()
+
+	defer func() {
+		// Write mem profile if requested.
+		if cfg.MemProfile != "" {
+			memf, err := os.Create(cfg.MemProfile)
+			if err != nil {
+				fmt.Println(err)
+				btcdLog.Errorf("Unable to create mem profile: %v", err)
+				return
+			}
+			pprof.WriteHeapProfile(memf)
+			memf.Close()
+		}
+
+		btcdLog.Infof("Gracefully shutting down the nodes...")
+		mainNode.Stop()
+		srvrLog.Infof("Server shutdown complete")
+	}()
+
+	<-interrupt
+
+	fmt.Println("RETURN rootMainNodeStart")
+
+	return nil
+}
+
+func rootWorkerStart(interrupt <-chan struct{}) error {
+	// Enable http profiling server if requested.
+	if cfg.Profile != "" {
+		go func() {
+			listenAddr := net.JoinHostPort("", cfg.Profile)
+			btcdLog.Infof("Profile server listening on %s", listenAddr)
+			profileRedirect := http.RedirectHandler("/debug/pprof",
+				http.StatusSeeOther)
+			http.Handle("/", profileRedirect)
+			btcdLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
+		}()
+	}
+
+	// Write cpu profile if requested.
+	if cfg.CPUProfile != "" {
+		f, err := os.Create(cfg.CPUProfile)
+		if err != nil {
+			fmt.Println(err)
+			btcdLog.Errorf("Unable to create cpu profile: %v", err)
+			return err
+		}
+		pprof.StartCPUProfile(f)
+		defer f.Close()
+		defer pprof.StopCPUProfile()
+	}
+
+	// init/get the headers from the coordinator node
+	hState, err := InitBlockIndex()
+	if err != nil {
+		panic(err)
+	}
+
+	for i := int8(0); i < int8(cfg.NumWorkers); i++ {
+		workerNode, err := NewRemoteWorker(i, hState)
+		if err != nil {
+			panic(err)
+		}
+		workerNode.Start()
+	}
+
+	<-interrupt
+
+	defer func() {
+		// Write mem profile if requested.
+		if cfg.MemProfile != "" {
+			memf, err := os.Create(cfg.MemProfile)
+			if err != nil {
+				btcdLog.Errorf("Unable to create mem profile: %v", err)
+				return
+			}
+			pprof.WriteHeapProfile(memf)
+			memf.Close()
+		}
+	}()
+
+	return nil
+}
 
 // btcdMain is the real main function for btcd.  It is necessary to work around
 // the fact that deferred functions do not run when os.Exit() is called.  The
@@ -62,6 +179,14 @@ func btcdMain(serverChan chan<- *server) error {
 
 	// Show version at startup.
 	btcdLog.Infof("Version %s", version())
+
+	if cfg.UtreexoMainNode {
+		return rootMainNodeStart(interrupt)
+	}
+
+	if cfg.UtreexoWorker {
+		return rootWorkerStart(interrupt)
+	}
 
 	// Enable http profiling server if requested.
 	if cfg.Profile != "" {
@@ -157,12 +282,28 @@ func btcdMain(serverChan chan<- *server) error {
 	}()
 
 	defer func() {
+		// Write mem profile if requested.
+		if cfg.MemProfile != "" {
+			memf, err := os.Create(cfg.MemProfile)
+			if err != nil {
+				fmt.Println(err)
+				btcdLog.Errorf("Unable to create mem profile: %v", err)
+				return
+			}
+			pprof.WriteHeapProfile(memf)
+			memf.Close()
+		}
+	}()
+
+	server.Start(nil)
+
+	defer func() {
 		btcdLog.Infof("Gracefully shutting down the server...")
 		server.Stop()
 		server.WaitForShutdown()
 		srvrLog.Infof("Server shutdown complete")
 	}()
-	server.Start()
+
 	if serverChan != nil {
 		serverChan <- server
 	}
@@ -338,7 +479,7 @@ func main() {
 	// limits the garbage collector from excessively overallocating during
 	// bursts.  This value was arrived at with the help of profiling live
 	// usage.
-	debug.SetGCPercent(150)
+	//debug.SetGCPercent(20)
 
 	//f, err := os.Create("trace.out")
 	//if err != nil {
@@ -346,7 +487,6 @@ func main() {
 	//	os.Exit(1)
 	//}
 	//trace.Start(f)
-	//runtime.MemProfileRate = 1
 
 	// Up some limits.
 	if err := limits.SetLimits(); err != nil {
@@ -374,8 +514,5 @@ func main() {
 		os.Exit(1)
 	}
 	//trace.Stop()
-	//runtime.GC()
-	//memf, _ := os.Create("memprof")
-	//pprof.WriteHeapProfile(memf)
-	//defer memf.Close()
+	//f.Close()
 }

@@ -2,14 +2,11 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-// Copyright (c) 2013-2017 The btcsuite developers
-// Use of this source code is governed by an ISC
-// license that can be found in the LICENSE file.
-
 package txscript
 
 import (
 	"encoding/binary"
+	"fmt"
 )
 
 // opcodeArrayRef is used to break initialization cycles.
@@ -32,11 +29,12 @@ func init() {
 // The ByteIndex function may be used to obtain the tokenizer's current offset
 // into the raw script.
 type ScriptTokenizer struct {
-	script []byte
-	offset int32
-	op     *opcode
-	data   []byte
-	err    error
+	script  []byte
+	version uint16
+	offset  int32
+	op      *opcode
+	data    []byte
+	err     error
 }
 
 // Done returns true when either all opcodes have been exhausted or a parse
@@ -80,7 +78,9 @@ func (t *ScriptTokenizer) Next() bool {
 	case op.length > 1:
 		script := t.script[t.offset:]
 		if len(script) < op.length {
-			t.err = scriptError(ErrMalformedPush, ErrMalformedPush.String())
+			str := fmt.Sprintf("opcode %s requires %d bytes, but script only "+
+				"has %d remaining", op.name, op.length, len(script))
+			t.err = scriptError(ErrMalformedPush, str)
 			return false
 		}
 
@@ -94,7 +94,9 @@ func (t *ScriptTokenizer) Next() bool {
 	case op.length < 0:
 		script := t.script[t.offset+1:]
 		if len(script) < -op.length {
-			t.err = scriptError(ErrMalformedPush, ErrMalformedPush.String())
+			str := fmt.Sprintf("opcode %s requires %d bytes, but script only "+
+				"has %d remaining", op.name, -op.length, len(script))
+			t.err = scriptError(ErrMalformedPush, str)
 			return false
 		}
 
@@ -108,7 +110,8 @@ func (t *ScriptTokenizer) Next() bool {
 		case -4:
 			dataLen = int32(binary.LittleEndian.Uint32(script[:4]))
 		default:
-			t.err = scriptError(ErrMalformedPush, ErrMalformedPush.String())
+			str := fmt.Sprintf("invalid opcode length %d", op.length)
+			t.err = scriptError(ErrMalformedPush, str)
 			return false
 		}
 
@@ -117,7 +120,9 @@ func (t *ScriptTokenizer) Next() bool {
 
 		// Disallow entries that do not fit script or were sign extended.
 		if dataLen > int32(len(script)) || dataLen < 0 {
-			t.err = scriptError(ErrMalformedPush, ErrMalformedPush.String())
+			str := fmt.Sprintf("opcode %s pushes %d bytes, but script only "+
+				"has %d remaining", op.name, dataLen, len(script))
+			t.err = scriptError(ErrMalformedPush, str)
 			return false
 		}
 
@@ -166,8 +171,13 @@ func (t *ScriptTokenizer) Err() error {
 // immediately having an err set accordingly.
 //
 // See the docs for ScriptTokenizer for more details.
-func MakeScriptTokenizer(script []byte) ScriptTokenizer {
+func MakeScriptTokenizer(scriptVersion uint16, script []byte) ScriptTokenizer {
 	// Only version 0 scripts are currently supported.
 	var err error
-	return ScriptTokenizer{script: script, err: err}
+	if scriptVersion != 0 {
+		str := fmt.Sprintf("script version %d is not supported", scriptVersion)
+		err = scriptError(ErrUnsupportedScriptVersion, str)
+
+	}
+	return ScriptTokenizer{version: scriptVersion, script: script, err: err}
 }

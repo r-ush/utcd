@@ -670,24 +670,21 @@ func disasmOpcode(buf *strings.Builder, op *opcode, data []byte, compact bool) {
 // dictate the script doesn't fail until the program counter passes over a
 // disabled opcode (even when they appear in a branch that is not executed).
 func opcodeDisabled(op *opcode, data []byte, vm *Engine) error {
-	str := fmt.Sprintf("attempt to execute disabled opcode %s",
-		op.name)
+	str := fmt.Sprintf("attempt to execute disabled opcode %s", op.name)
 	return scriptError(ErrDisabledOpcode, str)
 }
 
 // opcodeReserved is a common handler for all reserved opcodes.  It returns an
 // appropriate error indicating the opcode is reserved.
 func opcodeReserved(op *opcode, data []byte, vm *Engine) error {
-	str := fmt.Sprintf("attempt to execute reserved opcode %s",
-		op.name)
+	str := fmt.Sprintf("attempt to execute reserved opcode %s", op.name)
 	return scriptError(ErrReservedOpcode, str)
 }
 
 // opcodeInvalid is a common handler for all invalid opcodes.  It returns an
 // appropriate error indicating the opcode is invalid.
 func opcodeInvalid(op *opcode, data []byte, vm *Engine) error {
-	str := fmt.Sprintf("attempt to execute invalid opcode %s",
-		op.name)
+	str := fmt.Sprintf("attempt to execute invalid opcode %s", op.name)
 	return scriptError(ErrReservedOpcode, str)
 }
 
@@ -729,9 +726,10 @@ func opcodeNop(op *opcode, data []byte, vm *Engine) error {
 	switch op.value {
 	case OP_NOP1, OP_NOP4, OP_NOP5,
 		OP_NOP6, OP_NOP7, OP_NOP8, OP_NOP9, OP_NOP10:
+
 		if vm.hasFlag(ScriptDiscourageUpgradableNops) {
-			str := fmt.Sprintf("OP_NOP%d reserved for soft-fork "+
-				"upgrades", op.value-(OP_NOP1-1))
+			str := fmt.Sprintf("%v reserved for soft-fork "+
+				"upgrades", op.name)
 			return scriptError(ErrDiscourageUpgradableNOPs, str)
 		}
 	}
@@ -795,22 +793,20 @@ func popIfBool(vm *Engine) (bool, error) {
 // Data stack transformation: [... bool] -> [...]
 // Conditional stack transformation: [...] -> [... OpCondValue]
 func opcodeIf(op *opcode, data []byte, vm *Engine) error {
+	condVal := OpCondFalse
 	if vm.isBranchExecuting() {
 		ok, err := popIfBool(vm)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			// Branch execution is being disabled when it was not previously, so
-			// mark the current conditional nesting depth as the depth at which
-			// it was disabled.
-			vm.condDisableDepth = vm.condNestDepth
-		}
-	}
 
-	// Increment the conditional execution nesting depth to account for the
-	// conditional opcode.
-	vm.condNestDepth++
+		if ok {
+			condVal = OpCondTrue
+		}
+	} else {
+		condVal = OpCondSkip
+	}
+	vm.condStack = append(vm.condStack, condVal)
 	return nil
 }
 
@@ -831,22 +827,20 @@ func opcodeIf(op *opcode, data []byte, vm *Engine) error {
 // Data stack transformation: [... bool] -> [...]
 // Conditional stack transformation: [...] -> [... OpCondValue]
 func opcodeNotIf(op *opcode, data []byte, vm *Engine) error {
+	condVal := OpCondFalse
 	if vm.isBranchExecuting() {
 		ok, err := popIfBool(vm)
 		if err != nil {
 			return err
 		}
-		if ok {
-			// Branch execution is being disabled when it was not previously, so
-			// mark the current conditional nesting depth as the depth at which
-			// it was disabled.
-			vm.condDisableDepth = vm.condNestDepth
-		}
-	}
 
-	// Increment the conditional execution nesting depth to account for the
-	// conditional opcode.
-	vm.condNestDepth++
+		if !ok {
+			condVal = OpCondTrue
+		}
+	} else {
+		condVal = OpCondSkip
+	}
+	vm.condStack = append(vm.condStack, condVal)
 	return nil
 }
 
@@ -856,27 +850,21 @@ func opcodeNotIf(op *opcode, data []byte, vm *Engine) error {
 //
 // Conditional stack transformation: [... OpCondValue] -> [... !OpCondValue]
 func opcodeElse(op *opcode, data []byte, vm *Engine) error {
-	if vm.condNestDepth == 0 {
+	if len(vm.condStack) == 0 {
 		str := fmt.Sprintf("encountered opcode %s with no matching "+
 			"opcode to begin conditional execution", op.name)
 		return scriptError(ErrUnbalancedConditional, str)
 	}
 
-	conditionalDepth := vm.condNestDepth - 1
-	switch {
-	case vm.isBranchExecuting():
-		// Branch execution is being disabled when it was not previously, so
-		// mark the most recent conditional nesting depth as the depth at which
-		// it was disabled.
-		vm.condDisableDepth = conditionalDepth
-
-	case vm.condDisableDepth == conditionalDepth:
-		// Enable branch execution when it was previously disabled as a result
-		// of the opcode at the depth that is being toggled.
-		vm.condDisableDepth = noCondDisableDepth
-
-	default:
-		// No effect since this opcode is nested in a non-executed branch.
+	conditionalIdx := len(vm.condStack) - 1
+	switch vm.condStack[conditionalIdx] {
+	case OpCondTrue:
+		vm.condStack[conditionalIdx] = OpCondFalse
+	case OpCondFalse:
+		vm.condStack[conditionalIdx] = OpCondTrue
+	case OpCondSkip:
+		// Value doesn't change in skip since it indicates this opcode
+		// is nested in a non-executed branch.
 	}
 	return nil
 }
@@ -888,19 +876,13 @@ func opcodeElse(op *opcode, data []byte, vm *Engine) error {
 //
 // Conditional stack transformation: [... OpCondValue] -> [...]
 func opcodeEndif(op *opcode, data []byte, vm *Engine) error {
-	if vm.condNestDepth == 0 {
+	if len(vm.condStack) == 0 {
 		str := fmt.Sprintf("encountered opcode %s with no matching "+
 			"opcode to begin conditional execution", op.name)
 		return scriptError(ErrUnbalancedConditional, str)
 	}
 
-	// Decrement the conditional execution nesting depth and enable branch
-	// execution if it was previously disabled as a result of the opcode at
-	// that depth.
-	vm.condNestDepth--
-	if vm.condDisableDepth == vm.condNestDepth {
-		vm.condDisableDepth = noCondDisableDepth
-	}
+	vm.condStack = vm.condStack[:len(vm.condStack)-1]
 	return nil
 }
 
@@ -909,7 +891,7 @@ func opcodeEndif(op *opcode, data []byte, vm *Engine) error {
 // item on the stack or when that item evaluates to false.  In the latter case
 // where the verification fails specifically due to the top item evaluating
 // to false, the returned error will use the passed error code.
-func abstractVerify(op *opcode, data []byte, vm *Engine, c ErrorCode) error {
+func abstractVerify(op *opcode, vm *Engine, c ErrorCode) error {
 	verified, err := vm.dstack.PopBool()
 	if err != nil {
 		return err
@@ -925,7 +907,7 @@ func abstractVerify(op *opcode, data []byte, vm *Engine, c ErrorCode) error {
 // opcodeVerify examines the top item on the data stack as a boolean value and
 // verifies it evaluates to true.  An error is returned if it does not.
 func opcodeVerify(op *opcode, data []byte, vm *Engine) error {
-	return abstractVerify(op, data, vm, ErrVerify)
+	return abstractVerify(op, vm, ErrVerify)
 }
 
 // opcodeReturn returns an appropriate error since it is always an error to
@@ -1330,7 +1312,7 @@ func opcodeEqual(op *opcode, data []byte, vm *Engine) error {
 func opcodeEqualVerify(op *opcode, data []byte, vm *Engine) error {
 	err := opcodeEqual(op, data, vm)
 	if err == nil {
-		err = abstractVerify(op, data, vm, ErrEqualVerify)
+		err = abstractVerify(op, vm, ErrEqualVerify)
 	}
 	return err
 }
@@ -1568,7 +1550,7 @@ func opcodeNumEqual(op *opcode, data []byte, vm *Engine) error {
 func opcodeNumEqualVerify(op *opcode, data []byte, vm *Engine) error {
 	err := opcodeNumEqual(op, data, vm)
 	if err == nil {
-		err = abstractVerify(op, data, vm, ErrNumEqualVerify)
+		err = abstractVerify(op, vm, ErrNumEqualVerify)
 	}
 	return err
 }
@@ -1860,7 +1842,7 @@ func opcodeHash256(op *opcode, data []byte, vm *Engine) error {
 //
 // This opcode does not change the contents of the data stack.
 func opcodeCodeSeparator(op *opcode, data []byte, vm *Engine) error {
-	vm.lastCodeSep = vm.rawscriptIdx
+	vm.lastCodeSep = int(vm.tokenizer.ByteIndex())
 	return nil
 }
 
@@ -1934,7 +1916,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 			sigHashes = NewTxSigHashes(&vm.tx)
 		}
 
-		hash, err = calcWitnessSignatureHash(subScript, sigHashes, hashType,
+		hash, err = calcWitnessSignatureHashRaw(subScript, sigHashes, hashType,
 			&vm.tx, vm.txIdx, vm.inputAmount)
 		if err != nil {
 			return err
@@ -1947,37 +1929,51 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		hash = calcSignatureHash(subScript, hashType, &vm.tx, vm.txIdx)
 	}
 
-	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
-	if err != nil {
-		vm.dstack.PushBool(false)
-		return nil
-	}
-
-	var signature *btcec.Signature
-	if vm.hasFlag(ScriptVerifyStrictEncoding) ||
-		vm.hasFlag(ScriptVerifyDERSignatures) {
-
-		signature, err = btcec.ParseDERSignature(sigBytes, btcec.S256())
-	} else {
-		signature, err = btcec.ParseSignature(sigBytes, btcec.S256())
-	}
-	if err != nil {
-		vm.dstack.PushBool(false)
-		return nil
-	}
-
 	var valid bool
-	if vm.sigCache != nil {
-		var sigHash chainhash.Hash
-		copy(sigHash[:], hash)
+	if LibsecpAvailable {
+		if vm.sigCache != nil {
+			var sigHash chainhash.Hash
+			copy(sigHash[:], hash)
 
-		valid = vm.sigCache.Exists(sigHash, signature, pubKey)
-		if !valid && signature.Verify(hash, pubKey) {
-			vm.sigCache.Add(sigHash, signature, pubKey)
-			valid = true
+			valid = vm.sigCache.Exists(sigHash, sigBytes, pkBytes)
+			if !valid && LibsecpVerify(pkBytes, sigBytes, hash) {
+				vm.sigCache.Add(sigHash, sigBytes, pkBytes)
+				valid = true
+			}
+		} else {
+			valid = LibsecpVerify(pkBytes, sigBytes, hash)
 		}
 	} else {
-		valid = signature.Verify(hash, pubKey)
+		pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
+		if err != nil {
+			vm.dstack.PushBool(false)
+			return nil
+		}
+
+		var signature *btcec.Signature
+		if vm.hasFlag(ScriptVerifyStrictEncoding) ||
+			vm.hasFlag(ScriptVerifyDERSignatures) {
+
+			signature, err = btcec.ParseDERSignature(sigBytes, btcec.S256())
+		} else {
+			signature, err = btcec.ParseSignature(sigBytes, btcec.S256())
+		}
+		if err != nil {
+			vm.dstack.PushBool(false)
+			return nil
+		}
+		if vm.sigCache != nil {
+			var sigHash chainhash.Hash
+			copy(sigHash[:], hash)
+
+			valid = vm.sigCache.Exists(sigHash, sigBytes, pkBytes)
+			if !valid && signature.Verify(hash, pubKey) {
+				vm.sigCache.Add(sigHash, sigBytes, pkBytes)
+				valid = true
+			}
+		} else {
+			valid = signature.Verify(hash, pubKey)
+		}
 	}
 
 	if !valid && vm.hasFlag(ScriptVerifyNullFail) && len(sigBytes) > 0 {
@@ -1993,11 +1989,11 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 // The opcodeCheckSig function is invoked followed by opcodeVerify.  See the
 // documentation for each of those opcodes for more details.
 //
-// Stack transformation: signature pubkey] -> [... bool] -> [...]
+// Stack transformation: [... signature pubkey] -> [... bool] -> [...]
 func opcodeCheckSigVerify(op *opcode, data []byte, vm *Engine) error {
 	err := opcodeCheckSig(op, data, vm)
 	if err == nil {
-		err = abstractVerify(op, data, vm, ErrCheckSigVerify)
+		err = abstractVerify(op, vm, ErrCheckSigVerify)
 	}
 	return err
 }
@@ -2191,12 +2187,6 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 			return err
 		}
 
-		// Parse the pubkey.
-		parsedPubKey, err := btcec.ParsePubKey(pubKey, btcec.S256())
-		if err != nil {
-			continue
-		}
-
 		// Generate the signature hash based on the signature hash type.
 		var hash []byte
 		if vm.isWitnessVersionActive(0) {
@@ -2207,7 +2197,7 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 				sigHashes = NewTxSigHashes(&vm.tx)
 			}
 
-			hash, err = calcWitnessSignatureHash(script, sigHashes, hashType,
+			hash, err = calcWitnessSignatureHashRaw(script, sigHashes, hashType,
 				&vm.tx, vm.txIdx, vm.inputAmount)
 			if err != nil {
 				return err
@@ -2217,17 +2207,38 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 		}
 
 		var valid bool
-		if vm.sigCache != nil {
-			var sigHash chainhash.Hash
-			copy(sigHash[:], hash)
+		if LibsecpAvailable {
+			if vm.sigCache != nil {
+				var sigHash chainhash.Hash
+				copy(sigHash[:], hash)
 
-			valid = vm.sigCache.Exists(sigHash, parsedSig, parsedPubKey)
-			if !valid && parsedSig.Verify(hash, parsedPubKey) {
-				vm.sigCache.Add(sigHash, parsedSig, parsedPubKey)
-				valid = true
+				valid = vm.sigCache.Exists(sigHash, signature, pubKey)
+				if !valid && LibsecpVerify(pubKey, signature, hash) {
+					vm.sigCache.Add(sigHash, signature, pubKey)
+					valid = true
+				}
+			} else {
+				valid = LibsecpVerify(pubKey, signature, hash)
 			}
 		} else {
-			valid = parsedSig.Verify(hash, parsedPubKey)
+			// Parse the pubkey.
+			parsedPubKey, err := btcec.ParsePubKey(pubKey, btcec.S256())
+			if err != nil {
+				continue
+			}
+
+			if vm.sigCache != nil {
+				var sigHash chainhash.Hash
+				copy(sigHash[:], hash)
+
+				valid = vm.sigCache.Exists(sigHash, signature, pubKey)
+				if !valid && parsedSig.Verify(hash, parsedPubKey) {
+					vm.sigCache.Add(sigHash, signature, pubKey)
+					valid = true
+				}
+			} else {
+				valid = parsedSig.Verify(hash, parsedPubKey)
+			}
 		}
 
 		if valid {
@@ -2259,7 +2270,7 @@ func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
 func opcodeCheckMultiSigVerify(op *opcode, data []byte, vm *Engine) error {
 	err := opcodeCheckMultiSig(op, data, vm)
 	if err == nil {
-		err = abstractVerify(op, data, vm, ErrCheckMultiSigVerify)
+		err = abstractVerify(op, vm, ErrCheckMultiSigVerify)
 	}
 	return err
 }

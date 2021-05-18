@@ -85,24 +85,6 @@ func (t ScriptClass) String() string {
 	return scriptClassToName[t]
 }
 
-// isPubkey returns true if the script passed is a pay-to-pubkey transaction,
-// false otherwise.
-func isPubkey(script []byte) bool {
-	if len(script) == 35 {
-		if script[34] == OP_CHECKSIG {
-			return true
-		}
-	}
-
-	if len(script) == 67 {
-		if script[66] == OP_CHECKSIG {
-			return true
-		}
-	}
-
-	return false
-}
-
 // extractCompressedPubKey extracts a compressed public key from the passed
 // script if it is a standard pay-to-compressed-secp256k1-pubkey script.  It
 // will return nil otherwise.
@@ -127,21 +109,24 @@ func extractCompressedPubKey(script []byte) []byte {
 // script.  It will return nil otherwise.
 func extractUncompressedPubKey(script []byte) []byte {
 	// A pay-to-uncompressed-pubkey script is of the form:
-	//  OP_DATA_65 <65-byte uncompressed pubkey> OP_CHECKSIG
-
+	//   OP_DATA_65 <65-byte uncompressed pubkey> OP_CHECKSIG
+	//
 	// All non-hybrid uncompressed secp256k1 public keys must start with 0x04.
+	// Hybrid uncompressed secp256k1 public keys start with 0x06 or 0x07:
+	//   - 0x06 => hybrid format for even Y coords
+	//   - 0x07 => hybrid format for odd Y coords
 	if len(script) == 67 &&
 		script[66] == OP_CHECKSIG &&
-		script[0] == OP_DATA_65 {
+		script[0] == OP_DATA_65 &&
+		(script[1] == 0x04 || script[1] == 0x06 || script[1] == 0x07) {
 
 		return script[1:66]
 	}
-
 	return nil
 }
 
-// extractPubKey extracts either a compressed or uncompressed public key from the
-// passed script if it is either a standard pay-to-compressed-secp256k1-pubkey
+// extractPubKey extracts either compressed or uncompressed public key from the
+// passed script if it is a either a standard pay-to-compressed-secp256k1-pubkey
 // or pay-to-uncompressed-secp256k1-pubkey script, respectively.  It will return
 // nil otherwise.
 func extractPubKey(script []byte) []byte {
@@ -151,102 +136,11 @@ func extractPubKey(script []byte) []byte {
 	return extractUncompressedPubKey(script)
 }
 
-// isPubkeyHash returns true if the script passed is a pay-to-pubkey-hash
-// transaction, false otherwise.
-func isPubkeyHash(script []byte) bool {
-	return len(script) == 25 &&
-		script[0] == OP_DUP &&
-		script[1] == OP_HASH160 &&
-		script[2] == OP_DATA_20 &&
-		script[23] == OP_EQUALVERIFY &&
-		script[24] == OP_CHECKSIG
-}
-
-// isMultiSig returns whether or not the passed script is a standard
-// multisig script.
-func isMultiSig(script []byte) bool {
-	// Since this is only checking the form of the script, don't extract the
-	// public keys to avoid the allocation.
-	details := extractMultisigScriptDetails(script, false)
-	return details.valid
-}
-
-// multiSigDetails houses details extracted from a standard multisig script.
-type multiSigDetails struct {
-	requiredSigs int
-	numPubKeys   int
-	pubKeys      [][]byte
-	valid        bool
-}
-
-// extractMultisigScriptDetails attempts to extract details from the passed
-// script if it is a standard multisig script.  The returned details struct will
-// have the valid flag set to false otherwise.
-//
-// The extract pubkeys flag indicates whether or not the pubkeys themselves
-// should also be extracted and is provided because extracting them results in
-// an allocation that the caller might wish to avoid.  The pubKeys member of
-// the returned details struct will be nil when the flag is false.
-func extractMultisigScriptDetails(script []byte, extractPubKeys bool) multiSigDetails {
-	// A multi-signature script is of the form:
-	//  NUM_SIGS PUBKEY PUBKEY PUBKEY ... NUM_PUBKEYS OP_CHECKMULTISIG
-
-	// The script can't possibly be a multisig script if it doesn't end with
-	// OP_CHECKMULTISIG or have at least two small integer pushes preceding it.
-	// Fail fast to avoid more work below.
-	if len(script) < 3 || script[len(script)-1] != OP_CHECKMULTISIG {
-		return multiSigDetails{}
-	}
-
-	// The first opcode must be a small integer specifying the number of
-	// signatures required.
-	tokenizer := MakeScriptTokenizer(script)
-	if !tokenizer.Next() || !isSmallInt(tokenizer.Opcode()) {
-		return multiSigDetails{}
-	}
-	requiredSigs := AsSmallIntNew(tokenizer.Opcode())
-
-	// The next series of opcodes must either push public keys or be a small
-	// integer specifying the number of public keys.
-	var numPubKeys int
-	var pubKeys [][]byte
-	if extractPubKeys {
-		pubKeys = make([][]byte, 0, MaxPubKeysPerMultiSig)
-	}
-	for tokenizer.Next() {
-		data := tokenizer.Data()
-		if !isPubKeyEncoding(data) {
-			break
-		}
-		numPubKeys++
-		if extractPubKeys {
-			pubKeys = append(pubKeys, data)
-		}
-	}
-
-	if tokenizer.Done() {
-		return multiSigDetails{}
-	}
-
-	// The next opcode must be a small integer specifying the number of public
-	// keys required.
-	op := tokenizer.Opcode()
-	if !isSmallInt(op) || AsSmallIntNew(op) != numPubKeys {
-		return multiSigDetails{}
-	}
-
-	// There must only be a single opcode left unparsed which will be
-	// OP_CHECKMULTISIG per the check above.
-	if int32(len(tokenizer.Script()))-tokenizer.ByteIndex() != 1 {
-		return multiSigDetails{}
-	}
-
-	return multiSigDetails{
-		requiredSigs: requiredSigs,
-		numPubKeys:   numPubKeys,
-		pubKeys:      pubKeys,
-		valid:        true,
-	}
+// isPubKeyScript returns whether or not the passed script is either a standard
+// pay-to-compressed-secp256k1-pubkey or pay-to-uncompressed-secp256k1-pubkey
+// script.
+func isPubKeyScript(script []byte) bool {
+	return extractPubKey(script) != nil
 }
 
 // extractPubKeyHash extracts the public key hash from the passed script if it
@@ -267,31 +161,307 @@ func extractPubKeyHash(script []byte) []byte {
 	return nil
 }
 
-// extractWitnessV0PubKeyHash extracts the public key hash from the passed script if it
-// is a standard pay-to-witnessV0-pubkey-hash script.  It will return nil otherwise.
-func extractWitnessV0PubKeyHash(script []byte) []byte {
-	// A pay-to-witness-pubkey-hash script is of the form:
-	//  OP_0 <20-byte hash>
-	if len(script) == 22 &&
-		script[0] == OP_0 &&
-		script[1] == OP_DATA_20 {
+// isPubKeyHashScript returns whether or not the passed script is a standard
+// pay-to-pubkey-hash script.
+func isPubKeyHashScript(script []byte) bool {
+	return extractPubKeyHash(script) != nil
+}
 
-		return script[2:21]
+// extractScriptHash extracts the script hash from the passed script if it is a
+// standard pay-to-script-hash script.  It will return nil otherwise.
+//
+// NOTE: This function is only valid for version 0 opcodes.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
+func extractScriptHash(script []byte) []byte {
+	// A pay-to-script-hash script is of the form:
+	//  OP_HASH160 <20-byte scripthash> OP_EQUAL
+	if len(script) == 23 &&
+		script[0] == OP_HASH160 &&
+		script[1] == OP_DATA_20 &&
+		script[22] == OP_EQUAL {
+
+		return script[2:22]
 	}
 
 	return nil
 }
 
-// isNullData returns whether or not the passed script is a standard
+// isScriptHashScript returns whether or not the passed script is a standard
+// pay-to-script-hash script.
+func isScriptHashScript(script []byte) bool {
+	return extractScriptHash(script) != nil
+}
+
+// multiSigDetails houses details extracted from a standard multisig script.
+type multiSigDetails struct {
+	requiredSigs int
+	numPubKeys   int
+	pubKeys      [][]byte
+	valid        bool
+}
+
+// extractMultisigScriptDetails attempts to extract details from the passed
+// script if it is a standard multisig script.  The returned details struct will
+// have the valid flag set to false otherwise.
+//
+// The extract pubkeys flag indicates whether or not the pubkeys themselves
+// should also be extracted and is provided because extracting them results in
+// an allocation that the caller might wish to avoid.  The pubKeys member of
+// the returned details struct will be nil when the flag is false.
+//
+// NOTE: This function is only valid for version 0 scripts.  The returned
+// details struct will always be empty and have the valid flag set to false for
+// other script versions.
+func extractMultisigScriptDetails(scriptVersion uint16, script []byte, extractPubKeys bool) multiSigDetails {
+	// The only currently supported script version is 0.
+	if scriptVersion != 0 {
+		return multiSigDetails{}
+	}
+
+	// A multi-signature script is of the form:
+	//  NUM_SIGS PUBKEY PUBKEY PUBKEY ... NUM_PUBKEYS OP_CHECKMULTISIG
+
+	// The script can't possibly be a multisig script if it doesn't end with
+	// OP_CHECKMULTISIG or have at least two small integer pushes preceding it.
+	// Fail fast to avoid more work below.
+	if len(script) < 3 || script[len(script)-1] != OP_CHECKMULTISIG {
+		return multiSigDetails{}
+	}
+
+	// The first opcode must be a small integer specifying the number of
+	// signatures required.
+	tokenizer := MakeScriptTokenizer(scriptVersion, script)
+	if !tokenizer.Next() || !isSmallInt(tokenizer.Opcode()) {
+		return multiSigDetails{}
+	}
+	requiredSigs := asSmallInt(tokenizer.Opcode())
+
+	// The next series of opcodes must either push public keys or be a small
+	// integer specifying the number of public keys.
+	var numPubKeys int
+	var pubKeys [][]byte
+	if extractPubKeys {
+		pubKeys = make([][]byte, 0, MaxPubKeysPerMultiSig)
+	}
+	for tokenizer.Next() {
+		if isSmallInt(tokenizer.Opcode()) {
+			break
+		}
+
+		data := tokenizer.Data()
+		numPubKeys++
+		if !isStrictPubKeyEncoding(data) {
+			continue
+		}
+		if extractPubKeys {
+			pubKeys = append(pubKeys, data)
+		}
+	}
+	if tokenizer.Done() {
+		return multiSigDetails{}
+	}
+
+	// The next opcode must be a small integer specifying the number of public
+	// keys required.
+	op := tokenizer.Opcode()
+	if !isSmallInt(op) || asSmallInt(op) != numPubKeys {
+		return multiSigDetails{}
+	}
+
+	// There must only be a single opcode left unparsed which will be
+	// OP_CHECKMULTISIG per the check above.
+	if int32(len(tokenizer.Script()))-tokenizer.ByteIndex() != 1 {
+		return multiSigDetails{}
+	}
+
+	return multiSigDetails{
+		requiredSigs: requiredSigs,
+		numPubKeys:   numPubKeys,
+		pubKeys:      pubKeys,
+		valid:        true,
+	}
+}
+
+// isMultisigScript returns whether or not the passed script is a standard
+// multisig script.
+//
+// NOTE: This function is only valid for version 0 scripts.  It will always
+// return false for other script versions.
+func isMultisigScript(scriptVersion uint16, script []byte) bool {
+	// Since this is only checking the form of the script, don't extract the
+	// public keys to avoid the allocation.
+	details := extractMultisigScriptDetails(scriptVersion, script, false)
+	return details.valid
+}
+
+// IsMultisigScript returns whether or not the passed script is a standard
+// multisignature script.
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
+//
+// The error is DEPRECATED and will be removed in the major version bump.
+func IsMultisigScript(script []byte) (bool, error) {
+	const scriptVersion = 0
+	return isMultisigScript(scriptVersion, script), nil
+}
+
+// IsMultisigSigScript returns whether or not the passed script appears to be a
+// signature script which consists of a pay-to-script-hash multi-signature
+// redeem script.  Determining if a signature script is actually a redemption of
+// pay-to-script-hash requires the associated public key script which is often
+// expensive to obtain.  Therefore, this makes a fast best effort guess that has
+// a high probability of being correct by checking if the signature script ends
+// with a data push and treating that data push as if it were a p2sh redeem
+// script
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
+func IsMultisigSigScript(script []byte) bool {
+	const scriptVersion = 0
+
+	// The script can't possibly be a multisig signature script if it doesn't
+	// end with OP_CHECKMULTISIG in the redeem script or have at least two small
+	// integers preceding it, and the redeem script itself must be preceded by
+	// at least a data push opcode.  Fail fast to avoid more work below.
+	if len(script) < 4 || script[len(script)-1] != OP_CHECKMULTISIG {
+		return false
+	}
+
+	// Parse through the script to find the last opcode and any data it might
+	// push and treat it as a p2sh redeem script even though it might not
+	// actually be one.
+	possibleRedeemScript := finalOpcodeData(scriptVersion, script)
+	if possibleRedeemScript == nil {
+		return false
+	}
+
+	// Finally, return if that possible redeem script is a multisig script.
+	return isMultisigScript(scriptVersion, possibleRedeemScript)
+}
+
+// extractWitnessPubKeyHash extracts the witness public key hash from the passed
+// script if it is a standard pay-to-witness-pubkey-hash script. It will return
+// nil otherwise.
+func extractWitnessPubKeyHash(script []byte) []byte {
+	// A pay-to-witness-pubkey-hash script is of the form:
+	//   OP_0 OP_DATA_20 <20-byte-hash>
+	if len(script) == 22 &&
+		script[0] == OP_0 &&
+		script[1] == OP_DATA_20 {
+
+		return script[2:22]
+	}
+
+	return nil
+}
+
+// isWitnessPubKeyHashScript returns whether or not the passed script is a
+// standard pay-to-witness-pubkey-hash script.
+func isWitnessPubKeyHashScript(script []byte) bool {
+	return extractWitnessPubKeyHash(script) != nil
+}
+
+// extractWitnessScriptHash extracts the witness script hash from the passed
+// script if it is standard pay-to-witness-script-hash script. It will return
+// nil otherwise.
+func extractWitnessScriptHash(script []byte) []byte {
+	// A pay-to-witness-script-hash script is of the form:
+	//   OP_0 OP_DATA_32 <32-byte-hash>
+	if len(script) == 34 &&
+		script[0] == OP_0 &&
+		script[1] == OP_DATA_32 {
+
+		return script[2:34]
+	}
+
+	return nil
+}
+
+// isWitnessScriptHashScript returns whether or not the passed script is a
+// standard pay-to-witness-script-hash script.
+func isWitnessScriptHashScript(script []byte) bool {
+	return extractWitnessScriptHash(script) != nil
+}
+
+// extractWitnessProgramInfo returns the version and program if the passed
+// script constitutes a valid witness program. The alst return value indicates
+// whether or not the script is a valid witness program.
+func extractWitnessProgramInfo(script []byte) (int, []byte, bool) {
+	// Skip parsing if we know the program is invalid based on size.
+	if len(script) < 4 || len(script) > 42 {
+		return 0, nil, false
+	}
+
+	const scriptVersion = 0
+	tokenizer := MakeScriptTokenizer(scriptVersion, script)
+
+	// The first opcode must be a small int.
+	if !tokenizer.Next() ||
+		!isSmallInt(tokenizer.Opcode()) {
+
+		return 0, nil, false
+	}
+	version := asSmallInt(tokenizer.Opcode())
+
+	// The second opcode must be a canonical data push, the length of the
+	// data push is bounded to 40 by the initial check on overall script
+	// length.
+	if !tokenizer.Next() ||
+		!isCanonicalPush(tokenizer.Opcode(), tokenizer.Data()) {
+
+		return 0, nil, false
+	}
+	program := tokenizer.Data()
+
+	// The witness program is valid if there are no more opcodes, and we
+	// terminated without a parsing error.
+	valid := tokenizer.Done() && tokenizer.Err() == nil
+
+	return version, program, valid
+}
+
+// isWitnessProgramScript returns true if the passed script is a witness
+// program, and false otherwise. A witness program MUST adhere to the following
+// constraints: there must be exactly two pops (program version and the program
+// itself), the first opcode MUST be a small integer (0-16), the push data MUST
+// be canonical, and finally the size of the push data must be between 2 and 40
+// bytes.
+//
+// The length of the script must be between 4 and 42 bytes. The
+// smallest program is the witness version, followed by a data push of
+// 2 bytes.  The largest allowed witness program has a data push of
+// 40-bytes.
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
+func isWitnessProgramScript(script []byte) bool {
+	_, _, valid := extractWitnessProgramInfo(script)
+	return valid
+}
+
+// isNullDataScript returns whether or not the passed script is a standard
 // null data script.
-func isNullData(script []byte) bool {
+//
+// NOTE: This function is only valid for version 0 scripts.  It will always
+// return false for other script versions.
+func isNullDataScript(scriptVersion uint16, script []byte) bool {
+	// The only currently supported script version is 0.
+	if scriptVersion != 0 {
+		return false
+	}
+
 	// A null script is of the form:
 	//  OP_RETURN <optional data>
 	//
 	// Thus, it can either be a single OP_RETURN or an OP_RETURN followed by a
 	// data push up to MaxDataCarrierSize bytes.
 
-	// The script can't possibly be a null data script if it doesn't start
+	// The script can't possibly be a a null data script if it doesn't start
 	// with OP_RETURN.  Fail fast to avoid more work below.
 	if len(script) < 1 || script[0] != OP_RETURN {
 		return false
@@ -303,7 +473,7 @@ func isNullData(script []byte) bool {
 	}
 
 	// OP_RETURN followed by data push up to MaxDataCarrierSize bytes.
-	tokenizer := MakeScriptTokenizer(script[1:])
+	tokenizer := MakeScriptTokenizer(scriptVersion, script[1:])
 	return tokenizer.Next() && tokenizer.Done() &&
 		(isSmallInt(tokenizer.Opcode()) || tokenizer.Opcode() <= OP_PUSHDATA4) &&
 		len(tokenizer.Data()) <= MaxDataCarrierSize
@@ -311,30 +481,40 @@ func isNullData(script []byte) bool {
 
 // scriptType returns the type of the script being inspected from the known
 // standard types.
-func typeOfScript(script []byte) ScriptClass {
-	if isPubkey(script) {
-		return PubKeyTy
-	} else if isPubkeyHash(script) {
-		return PubKeyHashTy
-	} else if isWitnessPubKeyHash(script) {
-		return WitnessV0PubKeyHashTy
-	} else if isScriptHash(script) {
-		return ScriptHashTy
-	} else if isWitnessScriptHash(script) {
-		return WitnessV0ScriptHashTy
-	} else if isMultiSig(script) {
-		return MultiSigTy
-	} else if isNullData(script) {
-		return NullDataTy
+//
+// NOTE:  All scripts that are not version 0 are currently considered non
+// standard.
+func typeOfScript(scriptVersion uint16, script []byte) ScriptClass {
+	if scriptVersion != 0 {
+		return NonStandardTy
 	}
-	return NonStandardTy
+
+	switch {
+	case isPubKeyScript(script):
+		return PubKeyTy
+	case isPubKeyHashScript(script):
+		return PubKeyHashTy
+	case isScriptHashScript(script):
+		return ScriptHashTy
+	case isWitnessPubKeyHashScript(script):
+		return WitnessV0PubKeyHashTy
+	case isWitnessScriptHashScript(script):
+		return WitnessV0ScriptHashTy
+	case isMultisigScript(scriptVersion, script):
+		return MultiSigTy
+	case isNullDataScript(scriptVersion, script):
+		return NullDataTy
+	default:
+		return NonStandardTy
+	}
 }
 
 // GetScriptClass returns the class of the script passed.
 //
 // NonStandardTy will be returned when the script does not parse.
 func GetScriptClass(script []byte) ScriptClass {
-	return typeOfScript(script)
+	const scriptVersion = 0
+	return typeOfScript(scriptVersion, script)
 }
 
 // NewScriptClass returns the ScriptClass corresponding to the string name
@@ -358,6 +538,10 @@ func NewScriptClass(name string) (*ScriptClass, error) {
 // then -1 is returned. We are an internal function and thus assume that class
 // is the real class of pops (and we can thus assume things that were determined
 // while finding out the type).
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
 func expectedInputs(script []byte, class ScriptClass) int {
 	switch class {
 	case PubKeyTy:
@@ -385,7 +569,7 @@ func expectedInputs(script []byte, class ScriptClass) int {
 		// the original bitcoind bug where OP_CHECKMULTISIG pops an
 		// additional item from the stack, add an extra expected input
 		// for the extra push that is required to compensate.
-		return AsSmallIntNew(script[0]) + 1
+		return asSmallInt(script[0]) + 1
 
 	case NullDataTy:
 		fallthrough
@@ -417,10 +601,22 @@ type ScriptInfo struct {
 // pair.  It will error if the pair is in someway invalid such that they can not
 // be analysed, i.e. if they do not parse or the pkScript is not a push-only
 // script
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
+//
+// DEPRECATED.  This will be removed in the next major version bump.
 func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 	bip16, segwit bool) (*ScriptInfo, error) {
+
+	// Count the number of opcodes in the signature script while also ensuring
+	// that successfully parses.  Since there is a check below to ensure the
+	// script is push only, this equates to the number of inputs to the public
+	// key script.
+	const scriptVersion = 0
 	var numInputs int
-	tokenizer := MakeScriptTokenizer(sigScript)
+	tokenizer := MakeScriptTokenizer(scriptVersion, sigScript)
 	for tokenizer.Next() {
 		numInputs++
 	}
@@ -428,7 +624,7 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 		return nil, err
 	}
 
-	if err := checkScriptParses(pkScript); err != nil {
+	if err := checkScriptParses(scriptVersion, pkScript); err != nil {
 		return nil, err
 	}
 
@@ -439,27 +635,27 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 	}
 
 	si := new(ScriptInfo)
-	si.PkScriptClass = typeOfScript(pkScript)
+	si.PkScriptClass = typeOfScript(scriptVersion, pkScript)
 
 	si.ExpectedInputs = expectedInputs(pkScript, si.PkScriptClass)
-
-	// All entries pushed to stack (or are OP_RESERVED and exec will fail).
-	si.NumInputs = numInputs
 
 	switch {
 	// Count sigops taking into account pay-to-script-hash.
 	case si.PkScriptClass == ScriptHashTy && bip16 && !segwit:
-		// The pay-to-hash-script is the final data push of the
-		// signature script.
-		script := finalOpcodeData(sigScript)
-
-		shInputs := expectedInputs(script, typeOfScript(script))
-		if shInputs == -1 {
+		// The redeem script is the final data push of the signature script.
+		redeemScript := finalOpcodeData(scriptVersion, sigScript)
+		reedeemClass := typeOfScript(scriptVersion, redeemScript)
+		rsInputs := expectedInputs(redeemScript, reedeemClass)
+		if rsInputs == -1 {
 			si.ExpectedInputs = -1
 		} else {
-			si.ExpectedInputs += shInputs
+			si.ExpectedInputs += rsInputs
 		}
-		si.SigOps = countSigOps(script, true)
+		si.SigOps = countSigOpsV0(redeemScript, true)
+
+		// All entries pushed to stack (or are OP_RESERVED and exec
+		// will fail).
+		si.NumInputs = numInputs
 
 	// If segwit is active, and this is a regular p2wkh output, then we'll
 	// treat the script as a p2pkh output in essence.
@@ -475,7 +671,8 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 
 		// Extract the pushed witness program from the sigScript so we
 		// can determine the number of expected inputs.
-		shInputs := expectedInputs(sigScript[1:], typeOfScript(sigScript[1:]))
+		redeemClass := typeOfScript(scriptVersion, sigScript[1:])
+		shInputs := expectedInputs(sigScript[1:], redeemClass)
 		if shInputs == -1 {
 			si.ExpectedInputs = -1
 		} else {
@@ -484,16 +681,15 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 
 		si.SigOps = GetWitnessSigOpCount(sigScript, pkScript, witness)
 
-		si.NumInputs += len(witness)
+		si.NumInputs = len(witness)
+		si.NumInputs += numInputs
 
 	// If segwit is active, and this is a p2wsh output, then we'll need to
 	// examine the witness script to generate accurate script info.
 	case si.PkScriptClass == WitnessV0ScriptHashTy && segwit:
-		// The witness script is the final element of the witness
-		// stack.
 		witnessScript := witness[len(witness)-1]
-
-		shInputs := expectedInputs(witnessScript, typeOfScript(witnessScript))
+		redeemClass := typeOfScript(scriptVersion, witnessScript)
+		shInputs := expectedInputs(witnessScript, redeemClass)
 		if shInputs == -1 {
 			si.ExpectedInputs = -1
 		} else {
@@ -504,7 +700,11 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 		si.NumInputs = len(witness)
 
 	default:
-		si.SigOps = countSigOps(pkScript, true)
+		si.SigOps = countSigOpsV0(pkScript, true)
+
+		// All entries pushed to stack (or are OP_RESERVED and exec
+		// will fail).
+		si.NumInputs = numInputs
 	}
 
 	return si, nil
@@ -513,36 +713,21 @@ func CalcScriptInfo(sigScript, pkScript []byte, witness wire.TxWitness,
 // CalcMultiSigStats returns the number of public keys and signatures from
 // a multi-signature transaction script.  The passed script MUST already be
 // known to be a multi-signature script.
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
 func CalcMultiSigStats(script []byte) (int, int, error) {
-	// A multi-signature script is of the form:
-	//  NUM_SIGS PUBKEY PUBKEY PUBKEY ... NUM_PUBKEYS OP_CHECKMULTISIG
-
-	// The script can't possibly be a multisig script if it doesn't end with
-	// OP_CHECKMULTISIG or have at least two small integer pushes preceding it.
-	// Fail fast to avoid more work below.
-	if len(script) < 3 || script[len(script)-1] != OP_CHECKMULTISIG {
+	// The public keys are not needed here, so pass false to avoid the extra
+	// allocation.
+	const scriptVersion = 0
+	details := extractMultisigScriptDetails(scriptVersion, script, false)
+	if !details.valid {
 		str := fmt.Sprintf("script %x is not a multisig script", script)
 		return 0, 0, scriptError(ErrNotMultisigScript, str)
 	}
-	numPubKeys := AsSmallIntNew(script[len(script)-2])
 
-	// The first opcode must be a small integer specifying the number of
-	// signatures required.
-	tokenizer := MakeScriptTokenizer(script)
-	if !tokenizer.Next() || !isSmallInt(tokenizer.Opcode()) {
-		str := fmt.Sprintf("script %x is not a multisig script", script)
-		return 0, 0, scriptError(ErrNotMultisigScript, str)
-	}
-	requiredSigs := AsSmallIntNew(tokenizer.Opcode())
-
-	// Check if the script parses
-	for tokenizer.Next() {
-	}
-	if tokenizer.Err() != nil {
-		return 0, 0, tokenizer.Err()
-	}
-
-	return numPubKeys, requiredSigs, nil
+	return details.numPubKeys, details.requiredSigs, nil
 }
 
 // payToPubKeyHashScript creates a new script to pay a transaction
@@ -663,9 +848,15 @@ func MultiSigScript(pubkeys []*btcutil.AddressPubKey, nrequired int) ([]byte, er
 
 // PushedData returns an array of byte slices containing any pushed data found
 // in the passed script.  This includes OP_0, but not OP_1 - OP_16.
+//
+// NOTE: This function is only valid for version 0 scripts.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
 func PushedData(script []byte) ([][]byte, error) {
+	const scriptVersion = 0
+
 	var data [][]byte
-	tokenizer := MakeScriptTokenizer(script)
+	tokenizer := MakeScriptTokenizer(scriptVersion, script)
 	for tokenizer.Next() {
 		if tokenizer.Data() != nil {
 			data = append(data, tokenizer.Data())
@@ -682,10 +873,10 @@ func PushedData(script []byte) ([][]byte, error) {
 // pubKeyHashToAddrs is a convenience function to attempt to convert the
 // passed hash to a pay-to-pubkey-hash address housed within an address
 // slice.  It is used to consolidate common code.
-func pubKeyHashToAddrs(hash []byte, chainParams *chaincfg.Params) []btcutil.Address {
+func pubKeyHashToAddrs(hash []byte, params *chaincfg.Params) []btcutil.Address {
 	// Skip the pubkey hash if it's invalid for some reason.
 	var addrs []btcutil.Address
-	addr, err := btcutil.NewAddressPubKeyHash(hash, chainParams)
+	addr, err := btcutil.NewAddressPubKeyHash(hash, params)
 	if err == nil {
 		addrs = append(addrs, addr)
 	}
@@ -695,10 +886,10 @@ func pubKeyHashToAddrs(hash []byte, chainParams *chaincfg.Params) []btcutil.Addr
 // scriptHashToAddrs is a convenience function to attempt to convert the passed
 // hash to a pay-to-script-hash address housed within an address slice.  It is
 // used to consolidate common code.
-func scriptHashToAddrs(hash []byte, chainParams *chaincfg.Params) []btcutil.Address {
+func scriptHashToAddrs(hash []byte, params *chaincfg.Params) []btcutil.Address {
 	// Skip the hash if it's invalid for some reason.
 	var addrs []btcutil.Address
-	addr, err := btcutil.NewAddressScriptHashFromHash(hash, chainParams)
+	addr, err := btcutil.NewAddressScriptHashFromHash(hash, params)
 	if err == nil {
 		addrs = append(addrs, addr)
 	}
@@ -709,104 +900,73 @@ func scriptHashToAddrs(hash []byte, chainParams *chaincfg.Params) []btcutil.Addr
 // signatures associated with the passed PkScript.  Note that it only works for
 // 'standard' transaction script types.  Any data such as public keys which are
 // invalid are omitted from the results.
+//
+// NOTE: This function only attempts to identify version 0 scripts.  The return
+// value will indicate a nonstandard script type for other script versions along
+// with an invalid script version error.
 func ExtractPkScriptAddrs(pkScript []byte, chainParams *chaincfg.Params) (ScriptClass, []btcutil.Address, int, error) {
-	var addrs []btcutil.Address
-	var requiredSigs int
 
-	scriptClass := typeOfScript(pkScript)
-	switch scriptClass {
-	case PubKeyHashTy:
-		// A pay-to-pubkey-hash script is of the form:
-		//  OP_DUP OP_HASH160 <hash> OP_EQUALVERIFY OP_CHECKSIG
-		// Therefore the pubkey hash is the 3rd item on the stack.
-		// Skip the pubkey hash if it's invalid for some reason.
-		requiredSigs = 1
-		data := extractPubKeyHash(pkScript)
-		addr, err := btcutil.NewAddressPubKeyHash(data,
-			chainParams)
-		if err == nil {
-			addrs = append(addrs, addr)
-		}
+	// Check for pay-to-pubkey-hash script.
+	if hash := extractPubKeyHash(pkScript); hash != nil {
+		return PubKeyHashTy, pubKeyHashToAddrs(hash, chainParams), 1, nil
+	}
 
-	case WitnessV0PubKeyHashTy:
-		// A pay-to-witness-pubkey-hash script is of thw form:
-		//  OP_0 <20-byte hash>
-		// Therefore, the pubkey hash is the second item on the stack.
-		// Skip the pubkey hash if it's invalid for some reason.
-		requiredSigs = 1
-		data := extractWitnessV0PubKeyHash(pkScript)
-		addr, err := btcutil.NewAddressWitnessPubKeyHash(data,
-			chainParams)
-		if err == nil {
-			addrs = append(addrs, addr)
-		}
+	// Check for pay-to-script-hash.
+	if hash := extractScriptHash(pkScript); hash != nil {
+		return ScriptHashTy, scriptHashToAddrs(hash, chainParams), 1, nil
+	}
 
-	case PubKeyTy:
-		// A pay-to-pubkey script is of the form:
-		//  <pubkey> OP_CHECKSIG
-		// Therefore the pubkey is the first item on the stack.
-		// Skip the pubkey if it's invalid for some reason.
-		requiredSigs = 1
-		data := extractPubKey(pkScript)
+	// Check for pay-to-pubkey script.
+	if data := extractPubKey(pkScript); data != nil {
+		var addrs []btcutil.Address
 		addr, err := btcutil.NewAddressPubKey(data, chainParams)
 		if err == nil {
 			addrs = append(addrs, addr)
 		}
+		return PubKeyTy, addrs, 1, nil
+	}
 
-	case ScriptHashTy:
-		// A pay-to-script-hash script is of the form:
-		//  OP_HASH160 <scripthash> OP_EQUAL
-		// Therefore the script hash is the 2nd item on the stack.
-		// Skip the script hash if it's invalid for some reason.
-		requiredSigs = 1
-		data := ExtractScriptHash(pkScript)
-		addr, err := btcutil.NewAddressScriptHashFromHash(data,
-			chainParams)
-		if err == nil {
-			addrs = append(addrs, addr)
-		}
-
-	case WitnessV0ScriptHashTy:
-		// A pay-to-witness-script-hash script is of the form:
-		//  OP_0 <32-byte hash>
-		// Therefore, the script hash is the second item on the stack.
-		// Skip the script hash if it's invalid for some reason.
-		requiredSigs = 1
-		data := ExtractWitnessV0ScriptHash(pkScript)
-		addr, err := btcutil.NewAddressWitnessScriptHash(data,
-			chainParams)
-		if err == nil {
-			addrs = append(addrs, addr)
-		}
-
-	case MultiSigTy:
-		// A multi-signature script is of the form:
-		//  <numsigs> <pubkey> <pubkey> <pubkey>... <numpubkeys> OP_CHECKMULTISIG
-		// Therefore the number of required signatures is the 1st item
-		// on the stack and the number of public keys is the 2nd to last
-		// item on the stack.
-		details := extractMultisigScriptDetails(pkScript, true)
-		requiredSigs = details.requiredSigs
-
-		// Extract the public keys while skipping any that are invalid.
-		addrs = make([]btcutil.Address, 0, details.numPubKeys)
-		for i := 0; i < details.numPubKeys; i++ {
-			addr, err := btcutil.NewAddressPubKey(details.pubKeys[i], chainParams)
+	// Check for multi-signature script.
+	const scriptVersion = 0
+	details := extractMultisigScriptDetails(scriptVersion, pkScript, true)
+	if details.valid {
+		// Convert the public keys while skipping any that are invalid.
+		addrs := make([]btcutil.Address, 0, len(details.pubKeys))
+		for _, pubkey := range details.pubKeys {
+			addr, err := btcutil.NewAddressPubKey(pubkey, chainParams)
 			if err == nil {
 				addrs = append(addrs, addr)
 			}
 		}
-
-	case NullDataTy:
-		// Null data transactions have no addresses or required
-		// signatures.
-
-	case NonStandardTy:
-		// Don't attempt to extract addresses or required signatures for
-		// nonstandard transactions.
+		return MultiSigTy, addrs, details.requiredSigs, nil
 	}
 
-	return scriptClass, addrs, requiredSigs, nil
+	// Check for null data script.
+	if isNullDataScript(scriptVersion, pkScript) {
+		// Null data transactions have no addresses or required signatures.
+		return NullDataTy, nil, 0, nil
+	}
+
+	if hash := extractWitnessPubKeyHash(pkScript); hash != nil {
+		var addrs []btcutil.Address
+		addr, err := btcutil.NewAddressWitnessPubKeyHash(hash, chainParams)
+		if err == nil {
+			addrs = append(addrs, addr)
+		}
+		return WitnessV0PubKeyHashTy, addrs, 1, nil
+	}
+
+	if hash := extractWitnessScriptHash(pkScript); hash != nil {
+		var addrs []btcutil.Address
+		addr, err := btcutil.NewAddressWitnessScriptHash(hash, chainParams)
+		if err == nil {
+			addrs = append(addrs, addr)
+		}
+		return WitnessV0ScriptHashTy, addrs, 1, nil
+	}
+
+	// If none of the above passed, then the address must be non-standard.
+	return NonStandardTy, nil, 0, nil
 }
 
 // AtomicSwapDataPushes houses the data pushes found in atomic swap contracts.
@@ -829,6 +989,10 @@ type AtomicSwapDataPushes struct {
 //
 // This function is only defined in the txscript package due to API limitations
 // which prevent callers using txscript to parse nonstandard scripts.
+//
+// DEPRECATED.  This will be removed in the next major version bump.  The error
+// should also likely be removed if the code is reimplemented by any callers
+// since any errors result in a nil result anyway.
 func ExtractAtomicSwapDataPushes(version uint16, pkScript []byte) (*AtomicSwapDataPushes, error) {
 	// An atomic swap is of the form:
 	//  IF
@@ -848,7 +1012,7 @@ func ExtractAtomicSwapDataPushes(version uint16, pkScript []byte) (*AtomicSwapDa
 	var template = [20]templateMatch{
 		{opcode: OP_IF},
 		{opcode: OP_SIZE},
-		{expectCanonicalInt: true, maxIntBytes: MathOpCodeMaxScriptNumLen},
+		{expectCanonicalInt: true, maxIntBytes: maxScriptNumLen},
 		{opcode: OP_EQUALVERIFY},
 		{opcode: OP_SHA256},
 		{opcode: OP_DATA_32},
@@ -857,7 +1021,7 @@ func ExtractAtomicSwapDataPushes(version uint16, pkScript []byte) (*AtomicSwapDa
 		{opcode: OP_HASH160},
 		{opcode: OP_DATA_20},
 		{opcode: OP_ELSE},
-		{expectCanonicalInt: true, maxIntBytes: CltvMaxScriptNumLen},
+		{expectCanonicalInt: true, maxIntBytes: cltvMaxScriptNumLen},
 		{opcode: OP_CHECKLOCKTIMEVERIFY},
 		{opcode: OP_DROP},
 		{opcode: OP_DUP},
@@ -869,7 +1033,7 @@ func ExtractAtomicSwapDataPushes(version uint16, pkScript []byte) (*AtomicSwapDa
 	}
 
 	var templateOffset int
-	tokenizer := MakeScriptTokenizer(pkScript)
+	tokenizer := MakeScriptTokenizer(version, pkScript)
 	for tokenizer.Next() {
 		// Not an atomic swap script if it has more opcodes than expected in the
 		// template.
@@ -890,7 +1054,7 @@ func ExtractAtomicSwapDataPushes(version uint16, pkScript []byte) (*AtomicSwapDa
 				tplEntry.extractedInt = int64(val)
 
 			case isSmallInt(op):
-				tplEntry.extractedInt = int64(AsSmallIntNew(op))
+				tplEntry.extractedInt = int64(asSmallInt(op))
 
 			// Not an atomic swap script if the opcode does not push an int.
 			default:
@@ -914,7 +1078,7 @@ func ExtractAtomicSwapDataPushes(version uint16, pkScript []byte) (*AtomicSwapDa
 	}
 
 	// At this point, the script appears to be an atomic swap, so populate and
-	// return the extracted data.
+	// return the extacted data.
 	pushes := AtomicSwapDataPushes{
 		SecretSize: template[2].extractedInt,
 		LockTime:   template[11].extractedInt,

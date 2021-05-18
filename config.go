@@ -61,6 +61,7 @@ const (
 	defaultMaxOrphanTransactions = 100
 	defaultMaxOrphanTxSize       = 100000
 	defaultSigCacheMaxSize       = 100000
+	defaultUtxoCacheMaxSizeMiB   = 250
 	sampleConfigFilename         = "sample-btcd.conf"
 	defaultTxIndex               = false
 	defaultAddrIndex             = false
@@ -79,7 +80,7 @@ var (
 // change this to false test out the utreexo binary
 // otherwise it'll only enable utreexocsn and connect to the
 // designated nodes
-var release bool = true
+var release bool = false
 
 // runServiceCommand is only set to a real function on Windows.  It is used
 // to parse and execute service commands specified via the -s flag.
@@ -114,6 +115,7 @@ type config struct {
 	ConfigFile           string        `short:"C" long:"configfile" description:"Path to configuration file"`
 	ConnectPeers         []string      `long:"connect" description:"Connect only to the specified peers at startup"`
 	CPUProfile           string        `long:"cpuprofile" description:"Write CPU profile to the specified file"`
+	MemProfile           string        `long:"memprofile" description:"Write memory profile to the specified file"`
 	DataDir              string        `short:"b" long:"datadir" description:"Directory to store data"`
 	DbType               string        `long:"dbtype" description:"Database backend to use for the Block Chain"`
 	DebugLevel           string        `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
@@ -166,17 +168,24 @@ type config struct {
 	SimNet               bool          `long:"simnet" description:"Use the simulation test network"`
 	TestNet3             bool          `long:"testnet" description:"Use the test network"`
 	Utreexo              bool          `long:"utreexo" description:"Serve Utreexo Proofs"`
+	UtreexoInRam         bool          `long:"utreexoinram" description:"Whether to keep the Utreexo accumulator in ram or not"`
 	UtreexoBSPath        string        `long:"utreexobspath" description:"Path for saving the Utreexo BridgeNode State"`
 	UtreexoCSN           bool          `long:"utreexocsn" description:"Enable Utreexo pruning"`
 	UtreexoLookAhead     int           `long:"utreexolookahead" description:"How many blocks ahead to cache for Utreexo"`
+	UtreexoMainNode      bool          `long:"utreexomain" description:"Enable the ability to have remote workers for UtreexoRootVerifyMode"`
+	UtreexoWorker        bool          `long:"utreexoworker" description:"Make this node a worker for a UtreexoMainNode"`
+	NumWorkers           int           `long:"numworkers" description:"How many workers to have for a UtreexoMainNode"`
+	MainNodeIP           string        `long:"mainnodeip" description:"IP to connect to for a UtreexoWorker"`
 	TorIsolation         bool          `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection."`
 	TrickleInterval      time.Duration `long:"trickleinterval" description:"Minimum time between attempts to send new inventory to a connected peer"`
+	UserAgentComments    []string      `long:"uacomment" description:"Comment to add to the user agent -- See BIP 14 for more information."`
+	UtxoCacheMaxSizeMiB  uint          `long:"utxocachemaxsize" description:"The maximum size in MiB of the UTXO cache"`
 	TTL                  bool          `long:"ttl" description:"Enable indexing of the time-to-live values for txos"`
 	TxIndex              bool          `long:"txindex" description:"Maintain a full hash-based transaction index which makes all transactions available via the getrawtransaction RPC"`
-	UserAgentComments    []string      `long:"uacomment" description:"Comment to add to the user agent -- See BIP 14 for more information."`
 	Upnp                 bool          `long:"upnp" description:"Use UPnP to map our listening port outside of NAT"`
 	ShowVersion          bool          `short:"V" long:"version" description:"Display version information and exit"`
 	Whitelists           []string      `long:"whitelist" description:"Add an IP network or IP that will not be banned. (eg. 192.168.1.0/24 or ::1)"`
+	NoAssumeValid        bool          `long:"noassumevalid" description:"Turn assumevalid off"`
 	lookup               func(string) ([]net.IP, error)
 	oniondial            func(string, string, time.Duration) (net.Conn, error)
 	dial                 func(string, string, time.Duration) (net.Conn, error)
@@ -440,6 +449,7 @@ func loadConfig() (*config, []string, error) {
 		BlockPrioritySize:    mempool.DefaultBlockPrioritySize,
 		MaxOrphanTxs:         defaultMaxOrphanTransactions,
 		SigCacheMaxSize:      defaultSigCacheMaxSize,
+		UtxoCacheMaxSizeMiB:  defaultUtxoCacheMaxSizeMiB,
 		Generate:             defaultGenerate,
 		TxIndex:              defaultTxIndex,
 		AddrIndex:            defaultAddrIndex,
@@ -567,6 +577,13 @@ func loadConfig() (*config, []string, error) {
 			}
 		}
 	}
+	//if !cfg.UtreexoMainNode {
+	//	cfg.ConnectPeers = []string{
+	//		"34.105.121.136", // mit-dci midwest-US
+	//		"35.188.186.244", // mit-dci midwest-US
+	//		"35.204.135.228", // mit-dci Europe
+	//	}
+	//}
 
 	err = os.MkdirAll(defaultHomeDir, 0700)
 	if err != nil {

@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 The Decred developers
+// Copyright (c) 2019 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -6,7 +6,6 @@ package txscript
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"testing"
 )
@@ -14,6 +13,8 @@ import (
 // TestScriptTokenizer ensures a wide variety of behavior provided by the script
 // tokenizer performs as expected.
 func TestScriptTokenizer(t *testing.T) {
+	t.Skip()
+
 	type expectedResult struct {
 		op    byte   // expected parsed opcode
 		data  []byte // expected parsed data
@@ -47,66 +48,66 @@ func TestScriptTokenizer(t *testing.T) {
 			script:   append([]byte{op}, data[1:]...),
 			expected: nil,
 			finalIdx: 0,
-			err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+			err:      scriptError(ErrMalformedPush, ""),
 		})
 	}
 
 	// Add both positive and negative tests for OP_PUSHDATA{1,2,4}.
-	data := mustParseShortFormToken("0x01{76}")
+	data := mustParseShortForm("0x01{76}")
 	tests = append(tests, []tokenizerTest{{
 		name:     "OP_PUSHDATA1",
-		script:   mustParseShortFormToken("OP_PUSHDATA1 0x4c 0x01{76}"),
+		script:   mustParseShortForm("OP_PUSHDATA1 0x4c 0x01{76}"),
 		expected: []expectedResult{{OP_PUSHDATA1, data, 2 + int32(len(data))}},
 		finalIdx: 2 + int32(len(data)),
 		err:      nil,
 	}, {
 		name:     "OP_PUSHDATA1 no data length",
-		script:   mustParseShortFormToken("OP_PUSHDATA1"),
+		script:   mustParseShortForm("OP_PUSHDATA1"),
 		expected: nil,
 		finalIdx: 0,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:     "OP_PUSHDATA1 short data by 1 byte",
-		script:   mustParseShortFormToken("OP_PUSHDATA1 0x4c 0x01{75}"),
+		script:   mustParseShortForm("OP_PUSHDATA1 0x4c 0x01{75}"),
 		expected: nil,
 		finalIdx: 0,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:     "OP_PUSHDATA2",
-		script:   mustParseShortFormToken("OP_PUSHDATA2 0x4c00 0x01{76}"),
+		script:   mustParseShortForm("OP_PUSHDATA2 0x4c00 0x01{76}"),
 		expected: []expectedResult{{OP_PUSHDATA2, data, 3 + int32(len(data))}},
 		finalIdx: 3 + int32(len(data)),
 		err:      nil,
 	}, {
 		name:     "OP_PUSHDATA2 no data length",
-		script:   mustParseShortFormToken("OP_PUSHDATA2"),
+		script:   mustParseShortForm("OP_PUSHDATA2"),
 		expected: nil,
 		finalIdx: 0,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:     "OP_PUSHDATA2 short data by 1 byte",
-		script:   mustParseShortFormToken("OP_PUSHDATA2 0x4c00 0x01{75}"),
+		script:   mustParseShortForm("OP_PUSHDATA2 0x4c00 0x01{75}"),
 		expected: nil,
 		finalIdx: 0,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:     "OP_PUSHDATA4",
-		script:   mustParseShortFormToken("OP_PUSHDATA4 0x4c000000 0x01{76}"),
+		script:   mustParseShortForm("OP_PUSHDATA4 0x4c000000 0x01{76}"),
 		expected: []expectedResult{{OP_PUSHDATA4, data, 5 + int32(len(data))}},
 		finalIdx: 5 + int32(len(data)),
 		err:      nil,
 	}, {
 		name:     "OP_PUSHDATA4 no data length",
-		script:   mustParseShortFormToken("OP_PUSHDATA4"),
+		script:   mustParseShortForm("OP_PUSHDATA4"),
 		expected: nil,
 		finalIdx: 0,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:     "OP_PUSHDATA4 short data by 1 byte",
-		script:   mustParseShortFormToken("OP_PUSHDATA4 0x4c000000 0x01{75}"),
+		script:   mustParseShortForm("OP_PUSHDATA4 0x4c000000 0x01{75}"),
 		expected: nil,
 		finalIdx: 0,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}}...)
 
 	// Add tests for OP_0, and OP_1 through OP_16 (small integers/true/false).
@@ -124,66 +125,67 @@ func TestScriptTokenizer(t *testing.T) {
 		})
 	}
 
-	// Add various positive and negative tests for multi-opcode scripts.
+	// Add various positive and negative tests for  multi-opcode scripts.
 	tests = append(tests, []tokenizerTest{{
 		name:   "pay-to-pubkey-hash",
-		script: mustParseShortFormToken("DUP HASH160 DATA_20 0x01{20} EQUAL CHECKSIG"),
+		script: mustParseShortForm("DUP HASH160 DATA_20 0x01{20} EQUAL CHECKSIG"),
 		expected: []expectedResult{
 			{OP_DUP, nil, 1}, {OP_HASH160, nil, 2},
-			{OP_DATA_20, mustParseShortFormToken("0x01{20}"), 23},
+			{OP_DATA_20, mustParseShortForm("0x01{20}"), 23},
 			{OP_EQUAL, nil, 24}, {OP_CHECKSIG, nil, 25},
 		},
 		finalIdx: 25,
 		err:      nil,
 	}, {
 		name:   "almost pay-to-pubkey-hash (short data)",
-		script: mustParseShortFormToken("DUP HASH160 DATA_20 0x01{17} EQUAL CHECKSIG"),
+		script: mustParseShortForm("DUP HASH160 DATA_20 0x01{17} EQUAL CHECKSIG"),
 		expected: []expectedResult{
 			{OP_DUP, nil, 1}, {OP_HASH160, nil, 2},
 		},
 		finalIdx: 2,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:   "almost pay-to-pubkey-hash (overlapped data)",
-		script: mustParseShortFormToken("DUP HASH160 DATA_20 0x01{19} EQUAL CHECKSIG"),
+		script: mustParseShortForm("DUP HASH160 DATA_20 0x01{19} EQUAL CHECKSIG"),
 		expected: []expectedResult{
 			{OP_DUP, nil, 1}, {OP_HASH160, nil, 2},
-			{OP_DATA_20, mustParseShortFormToken("0x01{19} EQUAL"), 23},
+			{OP_DATA_20, mustParseShortForm("0x01{19} EQUAL"), 23},
 			{OP_CHECKSIG, nil, 24},
 		},
 		finalIdx: 24,
 		err:      nil,
 	}, {
 		name:   "pay-to-script-hash",
-		script: mustParseShortFormToken("HASH160 DATA_20 0x01{20} EQUAL"),
+		script: mustParseShortForm("HASH160 DATA_20 0x01{20} EQUAL"),
 		expected: []expectedResult{
 			{OP_HASH160, nil, 1},
-			{OP_DATA_20, mustParseShortFormToken("0x01{20}"), 22},
+			{OP_DATA_20, mustParseShortForm("0x01{20}"), 22},
 			{OP_EQUAL, nil, 23},
 		},
 		finalIdx: 23,
 		err:      nil,
 	}, {
 		name:   "almost pay-to-script-hash (short data)",
-		script: mustParseShortFormToken("HASH160 DATA_20 0x01{18} EQUAL"),
+		script: mustParseShortForm("HASH160 DATA_20 0x01{18} EQUAL"),
 		expected: []expectedResult{
 			{OP_HASH160, nil, 1},
 		},
 		finalIdx: 1,
-		err:      scriptError(ErrMalformedPush, ErrMalformedPush.String()),
+		err:      scriptError(ErrMalformedPush, ""),
 	}, {
 		name:   "almost pay-to-script-hash (overlapped data)",
-		script: mustParseShortFormToken("HASH160 DATA_20 0x01{19} EQUAL"),
+		script: mustParseShortForm("HASH160 DATA_20 0x01{19} EQUAL"),
 		expected: []expectedResult{
 			{OP_HASH160, nil, 1},
-			{OP_DATA_20, mustParseShortFormToken("0x01{19} EQUAL"), 22},
+			{OP_DATA_20, mustParseShortForm("0x01{19} EQUAL"), 22},
 		},
 		finalIdx: 22,
 		err:      nil,
 	}}...)
 
+	const scriptVersion = 0
 	for _, test := range tests {
-		tokenizer := MakeScriptTokenizer(test.script)
+		tokenizer := MakeScriptTokenizer(scriptVersion, test.script)
 		var opcodeNum int
 		for tokenizer.Next() {
 			// Ensure Next never returns true when there is an error set.
@@ -227,10 +229,14 @@ func TestScriptTokenizer(t *testing.T) {
 		}
 
 		// Ensure the error is as expected.
-		if !errors.Is(tokenizer.Err(), test.err) {
-			t.Fatalf("%q: unexpected tokenizer err -- got %v, want %v",
-				test.name, tokenizer.Err(), test.err)
-
+		if test.err == nil && tokenizer.Err() != nil {
+			t.Fatalf("%q: unexpected tokenizer err -- got %v, want nil",
+				test.name, tokenizer.Err())
+		} else if test.err != nil {
+			if !IsErrorCode(tokenizer.Err(), test.err.(Error).ErrorCode) {
+				t.Fatalf("%q: unexpected tokenizer err -- got %v, want %v",
+					test.name, tokenizer.Err(), test.err.(Error).ErrorCode)
+			}
 		}
 
 		// Ensure the final index is the expected value.
@@ -239,5 +245,15 @@ func TestScriptTokenizer(t *testing.T) {
 			t.Fatalf("%q: unexpected final byte index -- got %d, want %d",
 				test.name, tokenizerIdx, test.finalIdx)
 		}
+	}
+}
+
+// TestScriptTokenizerUnsupportedVersion ensures the tokenizer fails immediately
+// with an unsupported script version.
+func TestScriptTokenizerUnsupportedVersion(t *testing.T) {
+	const scriptVersion = 65535
+	tokenizer := MakeScriptTokenizer(scriptVersion, nil)
+	if !IsErrorCode(tokenizer.Err(), ErrUnsupportedScriptVersion) {
+		t.Fatalf("script tokenizer did not error with unsupported version")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/wire"
@@ -53,6 +54,10 @@ var (
 	// chainStateKeyName is the name of the db key used to store the best
 	// chain state.
 	chainStateKeyName = []byte("chainstate")
+
+	// utxoStateConsistencyKeyName is the name of the db key used to store the
+	// consistency status of the utxo state.
+	utxoStateConsistencyKeyName = []byte("utxostateconsistency")
 
 	// spendJournalVersionKeyName is the name of the db key used to store
 	// the version of the spend journal currently in the database.
@@ -167,19 +172,10 @@ func serializeUtreexoView(uView *UtreexoViewpoint) ([]byte, error) {
 		return nil, err
 	}
 
-	//serializedAcc = append(serializedAcc, uView.bestHash[:]...)
-
 	return serializedAcc, nil
 }
 
 func deserializeUtreexoView(uView *UtreexoViewpoint, serializedUView []byte) error {
-	//bestHash := serializedUView[len(serializedUView)-chainhash.HashSize:]
-
-	//if len(bestHash) != chainhash.HashSize {
-	//	return errDeserialize(fmt.Sprintf("deserialized bestHash less than 32 bytes"+"bestHash: %v", bestHash))
-	//}
-	//copy(uView.bestHash[:], bestHash)
-
 	err := uView.accumulator.Deserialize(serializedUView)
 	if err != nil {
 		return err
@@ -454,8 +450,11 @@ func decodeSpentTxOut(serialized []byte, stxo *SpentTxOut) (int, error) {
 
 	index, bytesRead := deserializeVLQ(serialized[offset:])
 	stxo.Index = int16(index) // NOTE Since the original value is uint16, this should be fine
-	stxo.TTL = int32(index)
 	offset += bytesRead
+
+	ttl, bytesReadTTL := deserializeVLQ(serialized[offset:])
+	stxo.TTL = int32(ttl)
+	offset += bytesReadTTL
 
 	// Decode the compressed txout.
 	amount, pkScript, bytesRead, err := decodeCompressedTxOut(
@@ -838,11 +837,12 @@ func dbFetchUtxoEntryByHash(dbTx database.Tx, hash *chainhash.Hash) (*UtxoEntry,
 //
 // When there is no entry for the provided output, nil will be returned for both
 // the entry and the error.
-func dbFetchUtxoEntry(dbTx database.Tx, outpoint wire.OutPoint) (*UtxoEntry, error) {
+func dbFetchUtxoEntry(dbTx database.Tx, utxoBucket database.Bucket,
+	outpoint wire.OutPoint) (*UtxoEntry, error) {
+
 	// Fetch the unspent transaction output information for the passed
 	// transaction output.  Return now when there is no entry.
 	key := outpointKey(outpoint)
-	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
 	serializedUtxo := utxoBucket.Get(*key)
 	recycleOutpointKey(key)
 	if serializedUtxo == nil {
@@ -875,28 +875,57 @@ func dbFetchUtxoEntry(dbTx database.Tx, outpoint wire.OutPoint) (*UtxoEntry, err
 	return entry, nil
 }
 
-// dbPutUtxoView uses an existing database transaction to update the utxo set
-// in the database based on the provided utxo view contents and state.  In
-// particular, only the entries that have been marked as modified are written
-// to the database.
-func dbPutUtxoView(dbTx database.Tx, view *UtxoViewpoint) error {
-	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
-	for outpoint, entry := range view.entries {
-		// No need to update the database if the entry was not modified.
-		if entry == nil || !entry.isModified() {
-			continue
+// dbSeekUtxoEntry uses an existing database cursor to fetch the specified
+// transaction output from the utxo set.
+//
+// When there is no entry for the provided output, nil will be returned for both
+// the entry and the error.
+func dbSeekUtxoEntry(dbTx database.Tx, cursor database.Cursor, op *wire.OutPoint) (*UtxoEntry, error) {
+	key := outpointKey(*op)
+	exists := cursor.Seek(*key)
+	recycleOutpointKey(key)
+
+	if !exists {
+		return nil, nil
+	}
+
+	serializedUtxo := cursor.Value()
+
+	// A non-nil zero-length entry means there is an entry in the database
+	// for a spent transaction output which should never be the case.
+	if len(serializedUtxo) == 0 {
+		return nil, AssertError(fmt.Sprintf("database contains entry "+
+			"for spent tx output %v", op))
+	}
+
+	// Deserialize the utxo entry and return it.
+	entry, err := deserializeUtxoEntry(serializedUtxo)
+	if err != nil {
+		// Ensure any deserialization errors are returned as database
+		// corruption errors.
+		if isDeserializeErr(err) {
+			return nil, database.Error{
+				ErrorCode: database.ErrCorruption,
+				Description: fmt.Sprintf("corrupt utxo entry "+
+					"for %v: %v", op, err),
+			}
 		}
 
-		// Remove the utxo entry if it is spent.
-		if entry.IsSpent() {
-			key := outpointKey(outpoint)
-			err := utxoBucket.Delete(*key)
-			recycleOutpointKey(key)
-			if err != nil {
-				return err
-			}
+		return nil, err
+	}
 
-			continue
+	return entry, nil
+}
+
+// dbPutUtxoEntries uses an existing database transaction to update the utxo
+// entries in the database.
+func dbPutUtxoEntries(dbTx database.Tx, entries map[wire.OutPoint]*UtxoEntry) error {
+	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
+
+	for outpoint, entry := range entries {
+		//fmt.Println("dbPut", outpoint.String())
+		if entry == nil || entry.IsSpent() {
+			return AssertError("trying to store nil or spent entry")
 		}
 
 		// Serialize and store the utxo entry.
@@ -906,15 +935,32 @@ func dbPutUtxoView(dbTx database.Tx, view *UtxoViewpoint) error {
 		}
 		key := outpointKey(outpoint)
 		err = utxoBucket.Put(*key, serialized)
+		if err != nil {
+			return err
+		}
+
 		// NOTE: The key is intentionally not recycled here since the
 		// database interface contract prohibits modifications.  It will
 		// be garbage collected normally when the database is done with
 		// it.
+	}
+	return nil
+}
+
+// dbDeleteUtxoEntries uses an existing database transaction to delete the utxo
+// entries from the database.
+func dbDeleteUtxoEntries(dbTx database.Tx, outpoints []wire.OutPoint) error {
+	utxoBucket := dbTx.Metadata().Bucket(utxoSetBucketName)
+
+	for _, outpoint := range outpoints {
+		//fmt.Println("dbDel", outpoint.String())
+		key := outpointKey(outpoint)
+		err := utxoBucket.Delete(*key)
+		recycleOutpointKey(key)
 		if err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -1108,34 +1154,99 @@ func dbPutBestState(dbTx database.Tx, snapshot *BestState, workSum *big.Int) err
 	return dbTx.Metadata().Put(chainStateKeyName, serializedData)
 }
 
-func serializeBestState(snapshot *BestState) ([]byte, error) {
-	timeBytes, err := snapshot.MedianTime.GobEncode()
-	if err != nil {
-		return nil, err
+// -----------------------------------------------------------------------------
+// The utxo state consistency status is stored as the last hash at which the
+// state finished a flush and an indicator whether it was left in the middle
+// of a flush.
+//
+// The serialized format is:
+//
+//   <status code><consistent hash>
+//
+//   Field             Type             Size
+//   status code       byte             1
+//   consistent hash   chainhash.Hash   chainhash.HashSize
+//
+// The possible values for the state code are:
+//
+//   1: consistent with the given hash, no flush ongoing
+//   2: flush ongoing from the stored consistent hash to best state (see best
+//      state bucket)
+// -----------------------------------------------------------------------------
+
+const (
+	// UTXO consistency status (UCS) codes are used to indicate the
+	// consistency status of the utxo state in the database.
+
+	// ucsEmpty is used as a return value to indicate that no status was
+	// stored.  The zero value should not be stored in the database.
+	ucsEmpty byte = 0
+
+	ucsConsistent   = 1
+	ucsFlushOngoing = 2
+
+	// ucsNbCodes is the number of valid utxo consistency status codes.
+	ucsNbCodes = 3
+)
+
+// serializeUtxoStateConsistency serializes the utxo state consistency status
+// based on the given status code and hash.
+func serializeUtxoStateConsistency(code byte, hash *chainhash.Hash) []byte {
+	// Serialize the data as code + hash.
+	serialized := make([]byte, 1+chainhash.HashSize)
+	serialized[0] = code
+	copy(serialized[1:], hash[:])
+
+	return serialized
+}
+
+// deserializeUtxoStateConsistency deserializes the bytes representing the utxo
+// state consistency status into the status code and hash.
+func deserializeUtxoStateConsistency(serialized []byte) (byte, *chainhash.Hash, error) {
+	// Size must be status code byte + single hash.
+	if len(serialized) != chainhash.HashSize+1 {
+		return 0, nil, database.Error{
+			ErrorCode:   database.ErrCorruption,
+			Description: "corrupt utxo state consistency status",
+		}
 	}
 
-	// sha256 hash, int32, uint32, then all uint64
-	size := chainhash.HashSize + 4 + 4 + 8 + 8 + 8 + 8 + len(timeBytes)
+	code := serialized[0]
+	if code >= ucsNbCodes {
+		return 0, nil, database.Error{
+			ErrorCode:   database.ErrCorruption,
+			Description: "corrupt utxo state consistency status: unknown code",
+		}
+	}
 
-	serialized := make([]byte, size)
+	// Ignore error as this only fails on incorrect hash size.
+	hash, _ := chainhash.NewHash(serialized[1 : 1+chainhash.HashSize])
+	return code, hash, nil
+}
 
-	copy(serialized[0:chainhash.HashSize], snapshot.Hash[:])
-	offset := uint32(chainhash.HashSize)
-	byteOrder.PutUint32(serialized[offset:], uint32(snapshot.Height))
-	offset += 4
-	byteOrder.PutUint32(serialized[offset:], snapshot.Bits)
-	offset += 4
-	byteOrder.PutUint64(serialized[offset:], snapshot.BlockSize)
-	offset += 8
-	byteOrder.PutUint64(serialized[offset:], snapshot.BlockWeight)
-	offset += 8
-	byteOrder.PutUint64(serialized[offset:], snapshot.NumTxns)
-	offset += 8
-	byteOrder.PutUint64(serialized[offset:], snapshot.TotalTxns)
-	offset += 8
-	copy(serialized[offset:], timeBytes[:])
+// dbPutUtxoStateConsistency uses an existing database transaction to
+// update the utxo state consistency status with the given parameters.
+func dbPutUtxoStateConsistency(dbTx database.Tx, code byte, hash *chainhash.Hash) error {
+	// Seralize the utxo state consistency status.
+	serialized := serializeUtxoStateConsistency(code, hash)
 
-	return serialized, nil
+	// Store the utxo state consistency status into the database.
+	return dbTx.Metadata().Put(utxoStateConsistencyKeyName, serialized)
+}
+
+// dbFetchUtxoStateConsistency uses an existing database transaction to retrieve
+// the utxo state consistency status from the database.  The code is 0 when
+// nothing was found.
+func dbFetchUtxoStateConsistency(dbTx database.Tx) (byte, *chainhash.Hash, error) {
+	// Fetch the serialized data from the database.
+	serialized := dbTx.Metadata().Get(utxoStateConsistencyKeyName)
+	if serialized == nil {
+		// Not stored, so return empty state.
+		return ucsEmpty, nil, nil
+	}
+
+	// Deserialize to the consistency status.
+	return deserializeUtxoStateConsistency(serialized)
 }
 
 // createChainState initializes both the database and the chain state to the
@@ -1252,7 +1363,10 @@ func (b *BlockChain) createChainState() error {
 		// There are some extra data that needs to be created for utreexo bridge
 		// nodes.
 		if b.utreexo {
-			b.UtreexoBS = NewUtreexoBridgeState()
+			b.UtreexoBS, err = b.NewUtreexoBridgeState()
+			if err != nil {
+				return err
+			}
 			b.proofFileState = NewProofFileState()
 			b.proofFileState.InitProofFileState(filepath.Join(b.dataDir, "proof"))
 			_, err = meta.CreateBucket(txoTTLBucketName)
@@ -1271,6 +1385,77 @@ func (b *BlockChain) createChainState() error {
 // database.  When the db does not yet contain any chain state, both it and the
 // chain state are initialized to the genesis block.
 func (b *BlockChain) initChainState() error {
+	fmt.Println("b.utreexoRootVerifyMode", b.UtreexoRootVerifyMode)
+	if b.UtreexoRootVerifyMode {
+		// Create a new node from the genesis block and set it as the best node.
+		genesisBlock := btcutil.NewBlock(b.chainParams.GenesisBlock)
+		genesisBlock.SetHeight(0)
+		header := &genesisBlock.MsgBlock().Header
+		node := newBlockNode(header, nil)
+		node.status = statusDataStored | statusValid
+		b.bestChain.SetTip(node)
+
+		// Add the new node to the index which is used for faster lookups.
+		b.index.addNode(node)
+
+		// Initialize the state related to the best block.  Since it is the
+		// genesis block, use its timestamp for the median time.
+		numTxns := uint64(len(genesisBlock.MsgBlock().Transactions))
+		blockSize := uint64(genesisBlock.MsgBlock().SerializeSize())
+		blockWeight := uint64(GetBlockWeight(genesisBlock))
+		b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
+			numTxns, time.Unix(node.timestamp, 0))
+
+		b.memBlock = &memBlockStore{}
+		b.memBestState = &memBestState{}
+
+		return nil
+	}
+	// Skip all the other initialization if we're just verifing the utreexo root
+	// range. We don't save any state so this is fine.
+	if b.utreexoRootToVerify != nil {
+		// Create a new node from the genesis block and set it as the best node.
+		genesisBlock := btcutil.NewBlock(b.chainParams.GenesisBlock)
+		genesisBlock.SetHeight(0)
+		header := &genesisBlock.MsgBlock().Header
+		node := newBlockNode(header, nil)
+		node.status = statusDataStored | statusValid
+		b.bestChain.SetTip(node)
+
+		// Add the new node to the index which is used for faster lookups.
+		b.index.addNode(node)
+
+		// Initialize the state related to the best block.  Since it is the
+		// genesis block, use its timestamp for the median time.
+		numTxns := uint64(len(genesisBlock.MsgBlock().Transactions))
+		blockSize := uint64(genesisBlock.MsgBlock().SerializeSize())
+		blockWeight := uint64(GetBlockWeight(genesisBlock))
+		b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
+			numTxns, time.Unix(node.timestamp, 0))
+		prevUtreexoRoot := b.FindPreviousUtreexoRootHint(b.utreexoRootToVerify.Height)
+		// This means we're verifing from genesis
+		if prevUtreexoRoot == nil {
+			// Create empty utreexoViewpoint
+			b.utreexoViewpoint = NewUtreexoViewpoint()
+		} else {
+			rootBytes, err := chaincfg.UtreexoRootHintToBytes(*prevUtreexoRoot)
+			if err != nil {
+				return err
+			}
+
+			uView := NewUtreexoViewpoint()
+			err = deserializeUtreexoView(uView, rootBytes)
+			if err != nil {
+				return err
+			}
+			b.utreexoViewpoint = uView
+		}
+
+		b.memBlock = &memBlockStore{}
+		b.memBestState = &memBestState{}
+
+		return nil
+	}
 	// Determine the state of the chain database. We may need to initialize
 	// everything from scratch or upgrade certain buckets.
 	var initialized, hasBlockIndex bool
@@ -1296,8 +1481,9 @@ func (b *BlockChain) initChainState() error {
 		}
 	}
 
+	// If utreexo bridgenode is enabled, init the bridgenode related things
 	if b.utreexo {
-		b.UtreexoBS, err = RestoreUtreexoBridgeState(b.utreexoBSPath)
+		b.UtreexoBS, err = b.RestoreUtreexoBridgeState(filepath.Join(b.dataDir, "bridge_data"))
 		if err != nil {
 			return err
 		}
@@ -1371,6 +1557,7 @@ func (b *BlockChain) initChainState() error {
 			lastNode = node
 			i++
 		}
+		log.Debug("Done loading block index")
 
 		// Set the best chain view to the stored best state.
 		tip := b.index.LookupNode(&state.hash)
@@ -1659,6 +1846,7 @@ type ProofFileState struct {
 	currentOffset int64
 	proofState    proofFiler
 	offsetState   offsetFiler
+	offsets       []int64
 }
 
 // proofFiler is just the prooffile with a rw lock. Mimics the filer
@@ -1711,9 +1899,49 @@ func (pf *ProofFileState) InitProofFileState(path string) error {
 		rwMutex: sync.RWMutex{},
 	}
 
-	pf.currentOffset, err = proofFile.Seek(0, 2)
+	offsetFileSize, err := offsetFile.Seek(0, 2)
 	if err != nil {
 		return err
+	}
+	if offsetFileSize%8 != 0 {
+		return fmt.Errorf("offset file not mulitple of 8 bytes")
+	}
+
+	// resume setup -- read all existing offsets to ram
+	if offsetFileSize > 0 {
+		// offsetFile already exists so read the whole thing and send over the
+		// channel to the ttl worker.
+		maxHeight := int32(offsetFileSize / 8)
+		// seek back to the file start / block "0"
+		_, err := pf.offsetState.file.Seek(0, 0)
+		if err != nil {
+			return err
+		}
+		pf.offsets = make([]int64, maxHeight)
+
+		var currentHeight int32
+		// run through the file, read everything and push into the channel
+		for currentHeight < maxHeight {
+			err = binary.Read(pf.offsetState.file, binary.BigEndian, &pf.currentOffset)
+			if err != nil {
+				str := fmt.Sprintf("Err %s: couldn't populate in-ram offsets on startup", err)
+				return fmt.Errorf(str)
+			}
+			pf.offsets[currentHeight] = pf.currentOffset
+			currentHeight++
+		}
+
+		// set currentOffset to the end of the proof file
+		pf.currentOffset, _ = pf.proofState.file.Seek(0, 2)
+
+	} else { // first time startup
+		// there is no block 0 so leave that empty
+		_, err = pf.offsetState.file.Write(make([]byte, 8))
+		if err != nil {
+			return err
+		}
+		// do the same with the in-ram slice
+		pf.offsets = make([]int64, 1)
 	}
 
 	return nil
@@ -1762,6 +1990,10 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 	// pre-allocated the needed buffer
 	udSize := ud.SerializeSize()
 	buf := make([]byte, udSize)
+
+	// write write the offset of the current proof to the offset file
+	buf = buf[:8]
+	pf.offsets = append(pf.offsets, pf.currentOffset)
 
 	// write write the offset of the current proof to the offset file
 	pf.offsetState.rwMutex.Lock()
@@ -1815,26 +2047,13 @@ func (pf *ProofFileState) flatFileStoreAccProof(ud btcacc.UData) error {
 // FetchProof, given a block hash, will return the udata associated with that block
 //
 // This function is safe for concurrent access.
-func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
-	var height int32
-	err := b.db.View(func(dbTx database.Tx) error {
-		var err error
-		height, err = dbFetchHeightByHash(dbTx, hash)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
+func (b *BlockChain) FetchProof(height int32) (*btcacc.UData, error) {
 	// pre-allocate buf
 	buf := make([]byte, 8)
 
 	// First read the offset of where the proof is in the offsetfile
 	b.proofFileState.offsetState.rwMutex.RLock()
-	_, err = b.proofFileState.offsetState.file.ReadAt(buf, int64(8*height))
+	_, err := b.proofFileState.offsetState.file.ReadAt(buf, int64(8*height))
 	if err != nil {
 		return nil, err
 	}
@@ -1865,7 +2084,7 @@ func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 
 	size := binary.BigEndian.Uint32(buf)
 
-	if size > 1<<24 {
+	if size > 1<<31 {
 		return nil, fmt.Errorf("size at offest %d says %d which is too big", offset, size)
 	}
 
@@ -1885,6 +2104,33 @@ func (b *BlockChain) FetchProof(hash *chainhash.Hash) (*btcacc.UData, error) {
 	b.proofFileState.proofState.rwMutex.RUnlock()
 
 	return &ud, nil
+}
+
+// writeTTLs writes the time-to-live values to the flatfiles along with the utreexo proofs
+func (pf *ProofFileState) writeTTLs(block *btcutil.Block, stxos []SpentTxOut) error {
+	var ttlBytes [4]byte
+	count := countDedupedStxos(block)
+
+	for i := 0; i < count-1; i++ {
+		// If it's an OP_RETURN or a same block spend, skip
+		if stxos[i].TTL == 0 || stxos[i].Index == SSTxoIndexNA {
+			continue
+		}
+		binary.BigEndian.PutUint32(ttlBytes[:],
+			uint32(stxos[i].TTL))
+		// write it's lifespan as a 4 byte int32 (bit of a waste as
+		// 2 or 3 bytes would work)
+		// add 16: 4 for magic, 4 for size, 4 for height, 4 numTTL, then ttls start
+		pf.proofState.rwMutex.Lock()
+		_, err := pf.proofState.file.WriteAt(ttlBytes[:],
+			pf.offsets[stxos[i].Height]+16+int64(stxos[i].Index*4))
+		if err != nil {
+			return err
+		}
+		pf.proofState.rwMutex.Unlock()
+	}
+
+	return nil
 }
 
 // blockIndexKey generates the binary key for an entry in the block index

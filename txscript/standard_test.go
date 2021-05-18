@@ -21,21 +21,7 @@ import (
 // tests as a helper since the only way it can fail is if there is an error in
 // the test source code.
 func mustParseShortForm(script string) []byte {
-	s, err := parseShortFormToken(script)
-	if err != nil {
-		panic("invalid short form script in test source: err " +
-			err.Error() + ", script: " + script)
-	}
-
-	return s
-}
-
-// mustParseShortFormToken parses the passed short form script and returns the
-// resulting bytes.  It panics if an error occurs.  This is only used in the
-// tests as a helper since the only way it can fail is if there is an error in
-// the test source code.
-func mustParseShortFormToken(script string) []byte {
-	s, err := parseShortFormToken(script)
+	s, err := parseShortForm(script)
 	if err != nil {
 		panic("invalid short form script in test source: err " +
 			err.Error() + ", script: " + script)
@@ -857,11 +843,7 @@ func TestCalcMultiSigStats(t *testing.T) {
 		},
 		{
 			name: "multisig script",
-			script: "0 DATA_72 0x30450220106a3e4ef0b51b764a2887226" +
-				"2ffef55846514dacbdcbbdd652c849d395b4384022100" +
-				"e03ae554c3cbb40600d31dd46fc33f25e47bf8525b1fe" +
-				"07282e3b6ecb5f3bb2801 CODESEPARATOR 1 DATA_33 " +
-				"0x0232abdc893e7f0631364d7fd01cb33d24da45329a0" +
+			script: "1 DATA_33 0x0232abdc893e7f0631364d7fd01cb33d24da45329a0" +
 				"0357b3a7886211ab414d55a 1 CHECKMULTISIG",
 			err: nil,
 		},

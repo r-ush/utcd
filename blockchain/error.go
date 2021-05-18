@@ -212,6 +212,9 @@ const (
 	// ErrPreviousBlockUnknown indicates that the previous block is not known.
 	ErrPreviousBlockUnknown
 
+	// ErrPreviousHeaderUnknown indicates that the previous block is not known.
+	ErrPreviousHeaderUnknown
+
 	// ErrInvalidAncestorBlock indicates that an ancestor of this block has
 	// already failed validation.
 	ErrInvalidAncestorBlock
@@ -265,6 +268,7 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrInvalidWitnessCommitment:  "ErrInvalidWitnessCommitment",
 	ErrWitnessCommitmentMismatch: "ErrWitnessCommitmentMismatch",
 	ErrPreviousBlockUnknown:      "ErrPreviousBlockUnknown",
+	ErrPreviousHeaderUnknown:     "ErrPreviousHeaderUnknown",
 	ErrInvalidAncestorBlock:      "ErrInvalidAncestorBlock",
 	ErrPrevBlockNotBest:          "ErrPrevBlockNotBest",
 }

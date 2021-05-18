@@ -5,6 +5,7 @@
 package blockchain
 
 import (
+	"fmt"
 	"math/big"
 	"sort"
 	"sync"
@@ -131,6 +132,29 @@ func initBlockNode(node *blockNode, blockHeader *wire.BlockHeader, parent *block
 func newBlockNode(blockHeader *wire.BlockHeader, parent *blockNode) *blockNode {
 	var node blockNode
 	initBlockNode(&node, blockHeader, parent)
+	return &node
+}
+
+func initBlockNodeNoHash(node *blockNode, blockHeader *wire.BlockHeader, hash *chainhash.Hash, parent *blockNode) {
+	*node = blockNode{
+		hash:       *hash,
+		workSum:    CalcWork(blockHeader.Bits),
+		version:    blockHeader.Version,
+		bits:       blockHeader.Bits,
+		nonce:      blockHeader.Nonce,
+		timestamp:  blockHeader.Timestamp.Unix(),
+		merkleRoot: blockHeader.MerkleRoot,
+	}
+	if parent != nil {
+		node.parent = parent
+		node.height = parent.height + 1
+		node.workSum = node.workSum.Add(parent.workSum, node.workSum)
+	}
+}
+
+func newBlockNodeNoHash(blockHeader *wire.BlockHeader, hash *chainhash.Hash, parent *blockNode) *blockNode {
+	var node blockNode
+	initBlockNodeNoHash(&node, blockHeader, hash, parent)
 	return &node
 }
 
@@ -264,6 +288,51 @@ func (node *blockNode) CalcPastMedianTime() time.Time {
 	return time.Unix(medianTimestamp, 0)
 }
 
+// findHighestCommonAncestor searches for the highest common node between the
+// ancestors of the two given nodes.
+func findHighestCommonAncestor(node1, node2 *blockNode) *blockNode {
+	// Since the common ancestor cannot be higher than the lowest node, put
+	// the higher one to it's ancestor at the lower one's height.
+	if node1.height > node2.height {
+		node1 = node1.Ancestor(node2.height)
+	} else {
+		node2 = node2.Ancestor(node1.height)
+	}
+
+	// The search strategy used is to exponentially look back until the ancestor
+	// matches (or they are nil, in which case we reached the genesis block.
+	// Then, we go back from the last height that was not common to with linear
+	// steps until we find the first ancestor.
+
+	distance := int32(1)
+	for {
+		new1 := node1.RelativeAncestor(distance)
+		new2 := node2.RelativeAncestor(distance)
+		distance *= 2
+
+		if new1 == nil || new2 == nil || new1 == new2 {
+			break
+		}
+
+		node1, node2 = new1, new2
+	}
+
+	for node1 != node2 {
+		node1 = node1.parent
+		node2 = node2.parent
+
+		if node1 == nil || node2 == nil {
+			return nil
+		}
+	}
+
+	return node1
+}
+
+type SharedBlockIndex struct {
+	*blockIndex
+}
+
 // blockIndex provides facilities for keeping track of an in-memory index of the
 // block chain.  Although the name block chain suggests a single chain of
 // blocks, it is actually a tree-shaped structure where any node can have
@@ -322,6 +391,18 @@ func (bi *blockIndex) AddNode(node *blockNode) {
 	bi.Lock()
 	bi.addNode(node)
 	bi.dirty[node] = struct{}{}
+	bi.Unlock()
+}
+
+// AddNodeNoDirty adds the provided node to the block index.
+// Duplicate entries are not checked so it is up to caller to avoid adding them.
+// This function is meant for the utreexo parallel nodes which don't
+// flush to disk.
+//
+// This function is safe for concurrent access.
+func (bi *blockIndex) AddNodeNoDirty(node *blockNode) {
+	bi.Lock()
+	bi.addNode(node)
 	bi.Unlock()
 }
 
@@ -394,4 +475,13 @@ func (bi *blockIndex) flushToDB() error {
 
 	bi.Unlock()
 	return err
+}
+
+func (b *BlockChain) LookupNode(hash *chainhash.Hash) (int32, error) {
+	node := b.index.LookupNode(hash)
+	if node == nil {
+		return 0, fmt.Errorf("Unable to find a blockheight for hash %v", hash.String())
+	}
+
+	return node.height, nil
 }

@@ -23,13 +23,25 @@ use secp256k1 elliptic curve cryptography.
 $ go get -u github.com/btcsuite/btcd/btcec
 ```
 
+To use bitcoin-core's secp256k1 library.
+```bash
+$ git submodule init
+$ git submodule update
+$ cd secp256k1
+$ ./autogen.sh
+$ ./configure --prefix=$PWD
+$ make all
+$ make check
+$ make install
+```
+
 ## Examples
 
-* [Sign Message](http://godoc.org/github.com/btcsuite/btcd/btcec#example-package--SignMessage)  
+* [Sign Message](http://godoc.org/github.com/btcsuite/btcd/btcec#example-package--SignMessage)
   Demonstrates signing a message with a secp256k1 private key that is first
   parsed form raw bytes and serializing the generated signature.
 
-* [Verify Signature](http://godoc.org/github.com/btcsuite/btcd/btcec#example-package--VerifySignature)  
+* [Verify Signature](http://godoc.org/github.com/btcsuite/btcd/btcec#example-package--VerifySignature)
   Demonstrates verifying a secp256k1 signature against a public key that is
   first parsed from raw bytes.  The signature is also parsed from raw bytes.
 
@@ -65,4 +77,3 @@ verify the signature perform the following:
 
 Package btcec is licensed under the [copyfree](http://copyfree.org) ISC License
 except for btcec.go and btcec_test.go which is under the same license as Go.
-

@@ -7,9 +7,87 @@ package blockchain
 import (
 	"fmt"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/database"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
+
+// maybeAcceptHeader potentially accepts a block header to build the block index
+func (b *BlockChain) maybeAcceptHeader(header *wire.BlockHeader, utreexoStartRoot *chaincfg.UtreexoRootHint, flags BehaviorFlags) error {
+	// Check if the previous block header exists
+	prevHash := &header.PrevBlock
+	prevNode := b.index.LookupNode(prevHash)
+	if prevNode == nil {
+		str := fmt.Sprintf("previous header %s is unknown", prevHash)
+		return ruleError(ErrPreviousHeaderUnknown, str)
+	}
+
+	// Check sanity. This includes timestamp checking
+	err := checkBlockHeaderSanity(header, b.chainParams.PowLimit, b.timeSource, flags)
+	if err != nil {
+		return err
+	}
+
+	// Create a new block node for the block and add it to the node index.
+	newNode := newBlockNode(header, prevNode)
+	b.index.AddNodeNoDirty(newNode)
+	newNode.BuildAncestor()
+
+	// If we're in utreexo root verify mode and is
+	// verifying from the genesis, return here
+	if utreexoStartRoot == nil {
+		return nil
+	}
+
+	// If we're in utreexo root verify mode, set the bestChain tip
+	//
+	// TODO We're hashing twice per header here since there's a
+	// hash in checkBlockHeaderSanity
+	if header.BlockHash() == *utreexoStartRoot.Hash {
+		log.Infof("Setting the starting block to verify at height %v",
+			utreexoStartRoot.Height)
+		// This node is now the end of the best chain.
+		b.bestChain.SetTip(newNode)
+	}
+
+	return nil
+}
+
+// maybeAcceptHeaderUBlock is used for the utreesxo root verify mode and doesn't save
+// any blocks to the disk.
+func (b *BlockChain) maybeAcceptHeaderUBlock(ublock *btcutil.UBlock, uView *UtreexoViewpoint, flags BehaviorFlags) (bool, error) {
+	// The height of this block is one more than the referenced previous
+	// block.
+	prevHash := &ublock.Block().MsgBlock().Header.PrevBlock
+	prevNode := b.index.LookupNode(prevHash)
+	if prevNode == nil {
+		str := fmt.Sprintf("previous block %s is unknown", prevHash)
+		return false, ruleError(ErrPreviousBlockUnknown, str)
+	} else if b.index.NodeStatus(prevNode).KnownInvalid() {
+		str := fmt.Sprintf("previous block %s is known to be invalid", prevHash)
+		return false, ruleError(ErrInvalidAncestorBlock, str)
+	}
+
+	blockHeight := prevNode.height + 1
+	ublock.SetHeight(blockHeight)
+
+	// The block must pass all of the validation rules which depend on the
+	// position of the block within the block chain.
+	err := b.checkBlockContext(ublock.Block(), prevNode, flags)
+	if err != nil {
+		return false, err
+	}
+
+	curNode := b.index.LookupNode(ublock.Hash())
+
+	isMainChain, err := b.connectBestChainParallel(curNode, ublock, uView, flags)
+	if err != nil {
+		return false, err
+	}
+
+	return isMainChain, nil
+}
 
 // maybeAcceptBlock potentially accepts a block into the block chain and, if
 // accepted, returns whether or not it is on the main chain.  It performs
@@ -95,7 +173,7 @@ func (b *BlockChain) maybeAcceptBlock(block *btcutil.Block, flags BehaviorFlags)
 func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFlags) (bool, error) {
 	// The height of this block is one more than the referenced previous
 	// block.
-	prevHash := &ublock.MsgUBlock().MsgBlock.Header.PrevBlock
+	prevHash := &ublock.Block().MsgBlock().Header.PrevBlock
 	prevNode := b.index.LookupNode(prevHash)
 	if prevNode == nil {
 		str := fmt.Sprintf("previous block %s is unknown", prevHash)
@@ -138,7 +216,7 @@ func (b *BlockChain) maybeAcceptUBlock(ublock *btcutil.UBlock, flags BehaviorFla
 	// Create a new block node for the block and add it to the node index. Even
 	// if the block ultimately gets connected to the main chain, it starts out
 	// on a side chain.
-	blockHeader := &ublock.MsgUBlock().MsgBlock.Header
+	blockHeader := &ublock.Block().MsgBlock().Header
 	newNode := newBlockNode(blockHeader, prevNode)
 	newNode.BuildAncestor()
 	newNode.status = statusDataStored

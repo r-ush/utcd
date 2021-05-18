@@ -24,7 +24,7 @@ func (msgu *MsgUBlock) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) 
 	}
 
 	msgu.UtreexoData = btcacc.UData{}
-	err = msgu.UtreexoData.Deserialize(r)
+	err = msgu.UtreexoData.Decode(r)
 
 	return nil
 }
@@ -36,7 +36,7 @@ func (msgu *MsgUBlock) Deserialize(r io.Reader) (err error) {
 		return err
 	}
 
-	err = msgu.UtreexoData.Deserialize(r)
+	err = msgu.UtreexoData.Decode(r)
 	return
 }
 
@@ -45,7 +45,7 @@ func (msgu *MsgUBlock) BtcEncode(r io.Writer, pver uint32, enc MessageEncoding) 
 	if err != nil {
 		return err
 	}
-	err = msgu.UtreexoData.Serialize(r)
+	err = msgu.UtreexoData.Encode(r)
 
 	return nil
 }
@@ -55,7 +55,7 @@ func (msgu *MsgUBlock) Serialize(w io.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	err = msgu.UtreexoData.Serialize(w)
+	err = msgu.UtreexoData.Encode(w)
 	return
 }
 
@@ -76,11 +76,14 @@ func (msg *MsgUBlock) Command() string {
 
 // MaxPayloadLength returns the maximum length the payload can be for the
 // receiver.  This is part of the Message interface implementation.
+// TODO Re-check maxblock payload
 func (msg *MsgUBlock) MaxPayloadLength(pver uint32) uint32 {
 	// Block header at 80 bytes + transaction count + max transactions
 	// which can vary up to the MaxBlockPayload (including the block header
 	// and transaction count).
-	return MaxBlockPayload + 4000000
+	// Utreexo proof sizes may vary. Just have it at 4000000 for now
+	// TODO figure out maximum payload for proofs.
+	return MaxBlockPayload + 4000000 + 4000000
 }
 
 // NewMsgUBlock returns a new bitcoin block message that conforms to the
