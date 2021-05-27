@@ -85,7 +85,7 @@ There were three setups completed for the IBD benchmarks:
 
 # IRC
 
-- irc.freenode.net
+- irc.libera.chat
 - channel #utreexo
 
 ## License
