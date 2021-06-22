@@ -34,9 +34,15 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 		return err
 	}
 
+	// make slice of hashes from leafdata
+	delHashes := make([]accumulator.Hash, len(ub.MsgUBlock().UtreexoData.Stxos))
+	for i, _ := range ub.MsgUBlock().UtreexoData.Stxos {
+		delHashes[i] = ub.MsgUBlock().UtreexoData.Stxos[i].LeafHash()
+	}
+
 	// IngestBatchProof first checks that the utreexo proofs are valid. If it is valid,
 	// it readys the utreexo accumulator for additions/deletions.
-	err = uview.accumulator.IngestBatchProof(ub.MsgUBlock().UtreexoData.AccProof)
+	err = uview.accumulator.IngestBatchProof(delHashes, ub.MsgUBlock().UtreexoData.AccProof)
 	if err != nil {
 		return err
 	}
