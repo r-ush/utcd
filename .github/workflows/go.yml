@@ -20,10 +20,12 @@ jobs:
       - name: Build
         env:
           GO111MODULE: "on"
-        run: env CGO_ENABLED=0 go build ./...
+          CGO_ENABLED: "0"
+        run: go build ./...
       - name: Test
         env:
           GO111MODULE: "on"
+          CGO_ENABLED: "0"
         run: |
           sh ./goclean.sh
 
