@@ -12,6 +12,7 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: ${{ matrix.go }}
+          #submodules: recursive
       - name: Check out source
         uses: actions/checkout@v2
       - name: Install Linters
@@ -19,7 +20,7 @@ jobs:
       - name: Build
         env:
           GO111MODULE: "on"
-        run: go build ./...
+        run: env CGO_ENABLED=0 go build ./...
       - name: Test
         env:
           GO111MODULE: "on"
