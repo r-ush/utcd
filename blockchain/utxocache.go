@@ -481,7 +481,7 @@ func (s *utxoCache) getEntries(outpoints map[wire.OutPoint]struct{}) (
 func (s *utxoCache) FetchEntry(outpoint wire.OutPoint) (*UtxoEntry, error) {
 	s.mtx.Lock()
 	entries, err := s.getEntries(map[wire.OutPoint]struct{}{
-		outpoint: struct{}{},
+		outpoint: {},
 	})
 
 	if entry, ok := entries[outpoint]; ok {

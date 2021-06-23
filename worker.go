@@ -280,7 +280,7 @@ out:
 		conn.RemoteAddr(), mn.curWorkerCount)
 
 	if len(rootInProcess) > 0 {
-		for rootHeight, _ := range rootInProcess {
+		for rootHeight := range rootInProcess {
 			mn.UtreexoRootHints = append(mn.UtreexoRootHints, rootHeight)
 		}
 		mn.refresh <- struct{}{}
@@ -652,7 +652,7 @@ func createHeaderList(headers []*wire.BlockHeader, hashes []chainhash.Hash) (*li
 	var height int32
 	headerList := list.New()
 
-	for i, _ := range headers {
+	for i := range headers {
 		height++
 		blockHash := hashes[i]
 

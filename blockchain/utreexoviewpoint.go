@@ -41,7 +41,7 @@ func (uview *UtreexoViewpoint) Modify(ub *btcutil.UBlock) error {
 	// make slice of hashes from leafdata. These are the hash commitments
 	// to be proven.
 	delHashes := make([]accumulator.Hash, len(ub.UData().Stxos))
-	for i, _ := range ub.UData().Stxos {
+	for i := range ub.UData().Stxos {
 		delHashes[i] = ub.UData().Stxos[i].LeafHash()
 	}
 
