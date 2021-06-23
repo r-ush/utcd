@@ -1385,7 +1385,6 @@ func (b *BlockChain) createChainState() error {
 // database.  When the db does not yet contain any chain state, both it and the
 // chain state are initialized to the genesis block.
 func (b *BlockChain) initChainState() error {
-	fmt.Println("b.utreexoRootVerifyMode", b.UtreexoRootVerifyMode)
 	if b.UtreexoRootVerifyMode {
 		// Create a new node from the genesis block and set it as the best node.
 		genesisBlock := btcutil.NewBlock(b.chainParams.GenesisBlock)
