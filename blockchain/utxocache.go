@@ -520,7 +520,7 @@ func (s *utxoCache) getEntryByHash(hash *chainhash.Hash) (*UtxoEntry, error) {
 	prevOut := wire.OutPoint{Hash: *hash}
 	for idx := uint32(0); idx < MaxOutputsPerBlock; idx++ {
 		prevOut.Index = idx
-		if entry, _ := s.cachedEntries[prevOut]; entry != nil {
+		if entry := s.cachedEntries[prevOut]; entry != nil {
 			return entry.Clone(), nil
 		}
 	}
@@ -605,7 +605,7 @@ func (s *utxoCache) addEntry(outpoint wire.OutPoint, entry *UtxoEntry, overwrite
 		return nil
 	}
 
-	cachedEntry, _ := s.cachedEntries[outpoint]
+	cachedEntry := s.cachedEntries[outpoint]
 
 	// In overwrite mode, simply add the entry without doing these checks.
 	if !overwrite {

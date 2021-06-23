@@ -193,7 +193,7 @@ func dbPutUtreexoView(dbTx database.Tx, uView *UtreexoViewpoint, blockHash chain
 
 	utreexoSize := int32(len(serialized))
 
-	err = utreexoBucket.Put([]byte(blockHash[:]), serialized)
+	err = utreexoBucket.Put(blockHash[:], serialized)
 	if err != nil {
 		return 0, err
 	}
@@ -203,7 +203,7 @@ func dbPutUtreexoView(dbTx database.Tx, uView *UtreexoViewpoint, blockHash chain
 
 func dbFetchUtreexoView(dbTx database.Tx, blockHash chainhash.Hash) (*UtreexoViewpoint, error) {
 	utreexoBucket := dbTx.Metadata().Bucket(utreexoCSBucketName)
-	serializedUtreexoView := utreexoBucket.Get([]byte(blockHash[:]))
+	serializedUtreexoView := utreexoBucket.Get(blockHash[:])
 	if serializedUtreexoView == nil {
 		return nil, nil
 	}
@@ -228,7 +228,7 @@ func dbFetchUtreexoView(dbTx database.Tx, blockHash chainhash.Hash) (*UtreexoVie
 
 func dbRemoveUtreexoView(dbTx database.Tx, blockHash chainhash.Hash) error {
 	utreexoBucket := dbTx.Metadata().Bucket(utreexoCSBucketName)
-	return utreexoBucket.Delete([]byte(blockHash[:]))
+	return utreexoBucket.Delete(blockHash[:])
 }
 
 // -----------------------------------------------------------------------------

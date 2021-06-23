@@ -562,12 +562,10 @@ func (rwrk *RemoteWorker) Stop() {
 	btcdLog.Infof("remote worker shutting down")
 	close(rwrk.quit)
 	rwrk.wg.Wait()
-	return
 }
 
 func (rwrk *RemoteWorker) WaitForShutdown() {
 	rwrk.wg.Wait()
-	return
 }
 
 func InitBlockIndex() (*headerState, error) {

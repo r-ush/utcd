@@ -2625,8 +2625,6 @@ func (sm *SyncManager) uRootHandleUBlockMsg(ubmsg *ublockMsg) {
 	//if len(state.requestedBlocks) < minInFlightBlocks {
 	//	sm.fetchParallelVerifyUBlocks(ubmsg.ublock.Height()+1, uState.rootToVerify.Height)
 	//}
-
-	return
 }
 
 // handleBlockchainNotification handles notifications from blockchain.  It does
