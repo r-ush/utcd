@@ -9,7 +9,7 @@
 
 set -ex
 
-env GORACE="halt_on_error=1" go test -race -tags="rpctest" -covermode atomic -coverprofile=profile.cov ./...
+go test -tags="rpctest" -covermode atomic -coverprofile=profile.cov ./...
 
 # Automatic checks
 golangci-lint run --deadline=10m --disable-all \
