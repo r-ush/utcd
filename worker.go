@@ -267,9 +267,9 @@ out:
 			height := msg.result.uRootHintHeight
 			mn.rangeProcessed <- &netsync.ProcessedURootHint{
 				Validated:       valid,
-				URootHintHeight: int32(height),
+				URootHintHeight: height,
 			}
-			delete(rootInProcess, int32(height))
+			delete(rootInProcess, height)
 		default:
 			btcdLog.Errorf("remoteWorkerHandler got an unknown message command of %s from remote worker", msg.Command())
 		}

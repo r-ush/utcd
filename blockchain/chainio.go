@@ -2242,7 +2242,7 @@ func FetchTTL(dbTx database.Tx, height int32, hash *chainhash.Hash) []*TTL {
 		}
 
 		ttl := TTL{
-			Height: int32(height),
+			Height: height,
 			Index:  int16(i),
 			TTL:    int32(byteOrder.Uint32(serialized)),
 		}

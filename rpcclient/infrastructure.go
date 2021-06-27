@@ -163,6 +163,10 @@ type Client struct {
 	// disconnected indicated whether or not the server is disconnected.
 	disconnected bool
 
+	// whether or not to batch requests, false unless changed by Batch()
+	batch     bool
+	batchList *list.List
+
 	// retryCount holds the number of times the client has tried to
 	// reconnect to the RPC server.
 	retryCount int64
@@ -288,6 +292,41 @@ func (c *Client) trackRegisteredNtfns(cmd interface{}) {
 		}
 	}
 }
+
+// FutureGetBulkResult waits for the responses promised by the future
+// and returns them in a channel
+type FutureGetBulkResult chan *response
+
+// Receive waits for the response promised by the future and returns an map
+// of results by request id
+func (r FutureGetBulkResult) Receive() (BulkResult, error) {
+	m := make(BulkResult)
+	res, err := receiveFuture(r)
+	if err != nil {
+		return nil, err
+	}
+	var arr []IndividualBulkResult
+	err = json.Unmarshal(res, &arr)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, results := range arr {
+		m[results.Id] = results
+	}
+
+	return m, nil
+}
+
+// IndividualBulkResult represents one result
+// from a bulk json rpc api
+type IndividualBulkResult struct {
+	Result interface{}       `json:"result"`
+	Error  *btcjson.RPCError `json:"error"`
+	Id     uint64            `json:"id"`
+}
+
+type BulkResult = map[uint64]IndividualBulkResult
 
 // inMessage is the first type that an incoming message is unmarshaled
 // into. It supports both requests (for notification support) and
@@ -1397,6 +1436,24 @@ func New(config *ConnConfig, ntfnHandlers *NotificationHandlers) (*Client, error
 	return client, nil
 }
 
+// Batch is a factory that creates a client able to interact with the server using
+// JSON-RPC 2.0. The client is capable of accepting an arbitrary number of requests
+// and having the server process the all at the same time. It's compatible with both
+// btcd and bitcoind
+func NewBatch(config *ConnConfig) (*Client, error) {
+	if !config.HTTPPostMode {
+		return nil, errors.New("http post mode is required to use batch client")
+	}
+	// notification parameter is nil since notifications are not supported in POST mode.
+	client, err := New(config, nil)
+	if err != nil {
+		return nil, err
+	}
+	client.batch = true //copy the client with changed batch setting
+	client.start()
+	return client, nil
+}
+
 // Connect establishes the initial websocket connection.  This is necessary when
 // a client was created after setting the DisableConnectOnNew field of the
 // Config struct.
@@ -1533,4 +1590,70 @@ func (c *Client) BackendVersion() (BackendVersion, error) {
 	c.backendVersion = &version
 
 	return *c.backendVersion, nil
+}
+
+func (c *Client) sendAsync() FutureGetBulkResult {
+	// convert the array of marshalled json requests to a single request we can send
+	responseChan := make(chan *response, 1)
+	marshalledRequest := []byte("[")
+	for iter := c.batchList.Front(); iter != nil; iter = iter.Next() {
+		request := iter.Value.(*jsonRequest)
+		marshalledRequest = append(marshalledRequest, request.marshalledJSON...)
+		marshalledRequest = append(marshalledRequest, []byte(",")...)
+	}
+	if len(marshalledRequest) > 0 {
+		// removes the trailing comma to process the request individually
+		marshalledRequest = marshalledRequest[:len(marshalledRequest)-1]
+	}
+	marshalledRequest = append(marshalledRequest, []byte("]")...)
+	request := jsonRequest{
+		id:             c.NextID(),
+		method:         "",
+		cmd:            nil,
+		marshalledJSON: marshalledRequest,
+		responseChan:   responseChan,
+	}
+	c.sendPost(&request)
+	return responseChan
+}
+
+// Marshall's bulk requests and sends to the server
+// creates a response channel to receive the response
+func (c *Client) Send() error {
+	// if batchlist is empty, there's nothing to send
+	if c.batchList.Len() == 0 {
+		return nil
+	}
+
+	// clear batchlist in case of an error
+	defer func() {
+		c.batchList = list.New()
+	}()
+
+	result, err := c.sendAsync().Receive()
+
+	if err != nil {
+		return err
+	}
+
+	for iter := c.batchList.Front(); iter != nil; iter = iter.Next() {
+		var requestError error
+		request := iter.Value.(*jsonRequest)
+		individualResult := result[request.id]
+		fullResult, err := json.Marshal(individualResult.Result)
+		if err != nil {
+			return err
+		}
+
+		if individualResult.Error != nil {
+			requestError = individualResult.Error
+		}
+
+		result := response{
+			result: fullResult,
+			err:    requestError,
+		}
+		request.responseChan <- &result
+	}
+	return nil
 }

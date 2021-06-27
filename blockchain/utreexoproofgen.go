@@ -173,7 +173,7 @@ func blockToDelLeaves(stxos []SpentTxOut, block *btcutil.Block, inskip []uint32)
 				//BlockHash: *block.Hash(),
 				// TODO change this to chainhash.Hash
 				TxHash: btcacc.Hash(txIn.PreviousOutPoint.Hash),
-				Index:  uint32(txIn.PreviousOutPoint.Index),
+				Index:  txIn.PreviousOutPoint.Index,
 				// NOTE blockInIdx is needed for determining skips. So you
 				// would really need to variables but you can do this -1
 				// since coinbase tx doesn't have an stxo
