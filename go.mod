@@ -13,7 +13,6 @@ require (
 	github.com/jrick/logrotate v1.0.0
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mit-dci/utreexo v0.0.0-20210315015810-f7abca0043fb
-	github.com/piotrnar/gocoin v0.0.0-20210221093853-ec4713336ba8
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 )
 
